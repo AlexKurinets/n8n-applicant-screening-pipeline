@@ -26,7 +26,7 @@ function run(items, ctx) {
       specialty: c.specialty,
       years_experience: c.years_experience,
       license: `${c.license_state}${c.license_multistate ? ' (multistate)' : ''}`,
-      shift_preference: c.shift_preference,
+      shift_preference: c.shift_preference.charAt(0).toUpperCase() + c.shift_preference.slice(1),
     },
     score: screening.score,
     criteria: screening.criteria.map((k) => ({
