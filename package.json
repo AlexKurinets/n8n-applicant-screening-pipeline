@@ -1,0 +1,34 @@
+{
+  "name": "n8n-applicant-screening-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "n8n workflows that scrape an applicant portal, pre-filter with recruiter Boolean screens, score with Claude against a JSON contract, write statuses back and email Word submittals.",
+  "license": "MIT",
+  "author": "Alex Kurinets",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "node --test --test-concurrency=1 \"tests/e2e/*.test.js\"",
+    "lint": "eslint .",
+    "sync:code": "node scripts/sync-code-nodes.mjs",
+    "check:code": "node scripts/sync-code-nodes.mjs --check",
+    "outcomes": "node scripts/expected-outcomes.js"
+  },
+  "dependencies": {
+    "docxtemplater": "3.60.0",
+    "express": "4.21.2",
+    "mammoth": "1.9.0",
+    "nodemailer": "6.10.0",
+    "pdfkit": "0.15.2",
+    "pg": "8.13.1",
+    "pizzip": "3.1.8",
+    "unpdf": "1.8.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.11.0",
+    "globals": "17.12.0"
+  }
+}

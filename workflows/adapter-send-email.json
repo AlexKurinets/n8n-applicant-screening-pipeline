@@ -1,0 +1,90 @@
+{
+  "id": "AdapterEmail0001",
+  "name": "Adapter · Send email",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Email adapter\nEvery email leaves through this one sub-workflow. Production swapped the SMTP node for the Microsoft Outlook node (Graph, shared mailbox); callers did not change, because they only depend on this input: `from`, `to`, `cc`, `subject`, `html` and an optional binary `attachment_field`.",
+        "height": 150,
+        "width": 620,
+        "color": 7
+      },
+      "id": "ef0906f6-f52d-49dd-ad55-db0d882faba2",
+      "name": "Note: adapter",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "4b9fe661-d19c-4a00-a135-9b15099dd210",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $json.from }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false,
+          "ccEmail": "={{ $json.cc || '' }}",
+          "attachments": "={{ $json.attachment_field || '' }}"
+        }
+      },
+      "id": "348098cf-8ee6-4305-a6b4-cafa2e54bd83",
+      "name": "Send email (SMTP)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        480,
+        300
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "credSmtpOutbnd01",
+          "name": "Outbound mail (SMTP)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Send email (SMTP)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

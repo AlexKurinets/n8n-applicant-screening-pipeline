@@ -1,0 +1,348 @@
+{
+  "id": "ReplayDeadLetter",
+  "name": "Replay a dead letter",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Replay a dead letter\n`POST /webhook/screening/replay` with `{\"dead_letter_id\": 12}`. The dashboard's Replay button calls this. The failed run no longer holds a live claim, so the application is screened again from the top through the same workflow, and the dead letter records the outcome.",
+        "height": 130,
+        "width": 1100,
+        "color": 7
+      },
+      "id": "50017bbf-5d46-4289-ab8c-a01965fbb6bc",
+      "name": "Note: replay",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "screening/replay",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e9680453-cec7-402a-a108-10158672e18e",
+      "name": "Replay request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "42a1f898-9af7-42ff-a4f7-212a007d81d8"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update dead_letters set replay_requested_at = now()\nwhere id = $1::bigint and replayed_at is null\nreturning id as dead_letter_id, application_id, 'replay' as source;",
+        "options": {
+          "queryReplacement": "={{ [ $json.body.dead_letter_id ] }}"
+        }
+      },
+      "id": "fb208f1d-e029-4831-afd8-0a31f45a7f0e",
+      "name": "Find dead letter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "credPgLedger0001",
+          "name": "Screening ledger (Postgres)"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d2d96db5-a0cb-4168-ae51-d6ce04beaa30",
+              "leftValue": "={{ $json.application_id || '' }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "c40d4357-021f-464a-a50d-dc2e0a4f7b3a",
+      "name": "Replayable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "ScrApp0000000001",
+          "mode": "list",
+          "cachedResultName": "Screen application"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "e236a062-fbb6-48fd-a524-0c039c860080",
+      "name": "Screen application",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        920,
+        220
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update dead_letters set replayed_at = now(), replay_outcome = $2\nwhere id = $1::bigint\nreturning id, application_id, replay_outcome;",
+        "options": {
+          "queryReplacement": "={{ [ $('Find dead letter').first().json.dead_letter_id, $json.outcome || 'duplicate' ] }}"
+        }
+      },
+      "id": "dba2e68f-1998-42dd-a991-edd1cb999377",
+      "name": "Mark replayed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1160,
+        120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "credPgLedger0001",
+          "name": "Screening ledger (Postgres)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ replayed: true, application_id: $json.application_id, outcome: $json.replay_outcome }) }}",
+        "options": {}
+      },
+      "id": "021a721a-4c5f-45a5-ad86-92a16f802558",
+      "name": "Respond: replayed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1380,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/describe-failure.js {\"intakeNode\":\"Find dead letter\",\"workflow\":\"Replay a dead letter\"}\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/describe-failure.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Describe failure\".\n// Sits on the error output of an Execute Workflow node. It pairs the error with\n// the application that was being screened, so the dead letter can be replayed.\n\nfunction errorMessage(json) {\n  if (!json) return 'unknown error';\n  const e = json.error;\n  if (typeof e === 'string') return e;\n  if (e && e.message) return e.description ? `${e.message} (${e.description})` : e.message;\n  if (json.message) return json.message;\n  return JSON.stringify(json).slice(0, 500);\n}\n\n// The error item normally still carries the input fields (application_id,\n// source); the intake node is the fallback when it does not.\nfunction intakeFields(json, ctx, options) {\n  if (json && json.application_id) return json;\n  try {\n    return ctx.node(options.intakeNode) || {};\n  } catch {\n    return {};\n  }\n}\n\nfunction run(items, ctx, options = {}) {\n  return items.map(({ json }) => {\n    const intake = intakeFields(json, ctx, options);\n    return {\n      json: {\n        application_id: intake.application_id || null,\n        source: intake.source || options.source || 'unknown',\n        error_message: errorMessage(json),\n        failed_node: (errorMessage(json).match(/\\(node: ([^)]+)\\)/) || [])[1]\n          || (json.error && json.error.node && json.error.node.name) || null,\n        workflow: options.workflow || null,\n        execution_id: ctx.executionId,\n      },\n    };\n  });\n}\n\nmodule.exports = { run, errorMessage };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/describe-failure.js\").run($input.all(), __ctx, {\"intakeNode\":\"Find dead letter\",\"workflow\":\"Replay a dead letter\"});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Describe failure) \");\n  throw e;\n}"
+      },
+      "id": "36026fb5-ca0e-40f2-a868-f3b48284bd1a",
+      "name": "Describe failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "RecordFailure001",
+          "mode": "list",
+          "cachedResultName": "Record failure"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "7ad33df3-c0d6-4666-ab8b-5e2b4e578349",
+      "name": "Record failure",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1380,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ replayed: false, application_id: $('Find dead letter').first().json.application_id, error_code: $json.error_code || 'see new dead letter' }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "5740ce77-db22-425a-a7f4-d95c5c45cc11",
+      "name": "Respond: failed again",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ replayed: false, error: \"no open dead letter with that id\" }) }}",
+        "options": {
+          "responseCode": 404
+        }
+      },
+      "id": "4b57ba45-435b-4090-a3b4-a250a8d00514",
+      "name": "Respond: not found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        920,
+        440
+      ]
+    }
+  ],
+  "connections": {
+    "Replay request": {
+      "main": [
+        [
+          {
+            "node": "Find dead letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find dead letter": {
+      "main": [
+        [
+          {
+            "node": "Replayable?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replayable?": {
+      "main": [
+        [
+          {
+            "node": "Screen application",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: not found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Screen application": {
+      "main": [
+        [
+          {
+            "node": "Mark replayed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark replayed": {
+      "main": [
+        [
+          {
+            "node": "Respond: replayed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe failure": {
+      "main": [
+        [
+          {
+            "node": "Record failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record failure": {
+      "main": [
+        [
+          {
+            "node": "Respond: failed again",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "ErrorHandler0001"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

@@ -1,0 +1,1877 @@
+{
+  "id": "ScrApp0000000001",
+  "name": "Screen application",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 1 · Claim the application, log in, scrape it\nEvery trigger lands on **Claim run**: a partial unique index on `runs` allows one live claim per application, so a second trigger stops at *Skip duplicate*. An expired portal session doesn't return 401. It redirects to the login page, which arrives as HTTP 200, so **Check session** reads the page marker instead of the status, logs in once more, and fails loudly if it happens twice. **Normalize application** checks every selector against the `application.v1` contract.",
+        "height": 170,
+        "width": 2960,
+        "color": 7
+      },
+      "id": "5d923889-b510-44ca-a12f-99bce4f78d54",
+      "name": "Note: row 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        -130
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2 · Pre-filter, then score\nRequired documents, readable resume text and the recruiter's Boolean screen run before any model call, and they stop about 40% of applications. Claude rates each criterion 0 to 3 with a verbatim quote, using structured output. **Validate and score** checks the reply against `model_output.v1`, grounds every quote in the resume the model saw, and computes the 0 to 100 score itself.",
+        "height": 170,
+        "width": 2600,
+        "color": 7
+      },
+      "id": "8bacc65f-5e28-47d7-a682-94d1e62a4afd",
+      "name": "Note: row 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        870
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3 · Write back, send the submittal, close the run\nThe status goes through the portal's own form with its CSRF token, and only while the application is still New, so a recruiter's decision is never overwritten. A shortlisted candidate's Word submittal is reserved in `submittals` before it is sent, so a replay can never email it twice. **Complete run** writes the ledger the dashboard reads.",
+        "height": 150,
+        "width": 2600,
+        "color": 7
+      },
+      "id": "76018bd8-7c34-495d-aee0-d7753ef2d63f",
+      "name": "Note: row 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        1790
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Failed steps\nEvery HTTP node retries on its own first. If it still fails, its error output goes to a **… failed** node that re-throws it tagged with the step and status code, for example `[LLM_UNAVAILABLE]`. The intake workflow catches it and writes a dead letter that can be replayed.",
+        "height": 190,
+        "width": 560,
+        "color": 7
+      },
+      "id": "c3c54405-e5dc-4e78-ab99-85f696530234",
+      "name": "Note: errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2820,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "f0f1e135-17d9-4c30-af43-b0a4c0d6bf99",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jsonb_object_agg(key, value) as settings from settings;",
+        "options": {}
+      },
+      "id": "a4aaec4f-3e5a-4bd7-ab75-fa06ff3f7b06",
+      "name": "Load settings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "credPgLedger0001",
+          "name": "Screening ledger (Postgres)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- One live claim per application (partial unique index on runs).\n-- A second trigger for the same application lands here as a duplicate.\nwith claimed as (\n  insert into runs (application_id, source, n8n_execution_id)\n  values ($1, $2, $3)\n  on conflict (application_id) where status in ('processing', 'completed') do nothing\n  returning id\n), logged as (\n  insert into intake_events (application_id, source, outcome, run_id)\n  select $1, $2, case when exists (select 1 from claimed) then 'claimed' else 'duplicate' end, (select id from claimed)\n  returning outcome, run_id\n)\nselect run_id, outcome from logged;",
+        "options": {
+          "queryReplacement": "={{ [ $('Start').first().json.application_id, $('Start').first().json.source || 'manual', $execution.id ] }}"
+        }
+      },
+      "id": "ef3da760-1de6-46c4-aee9-7d702da463b1",
+      "name": "Claim run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        640,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "credPgLedger0001",
+          "name": "Screening ledger (Postgres)"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ff64cda6-0185-42a6-a502-232ae15f2129",
+              "leftValue": "={{ $json.outcome }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "claimed"
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "4648e43e-fffd-4633-aeee-d92a9f265cf1",
+      "name": "Claimed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        840,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "b501be4a-768d-4149-a32e-80e6760b806f",
+      "name": "Skip duplicate",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        490
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Load settings').first().json.settings.portal_base_url }}/login",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "527e1f32-bccf-4159-aa04-c43983228456",
+      "name": "Portal login",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        300
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "credPortalLogin1",
+          "name": "Portal service account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/portal-session.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/portal-session.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Read session\" / \"Read new session\".\n// The portal answers a good login with a 303 and a PORTALSESSID cookie, and a\n// bad one with 200 and the login form again. Only the first counts.\n\nfunction run(items) {\n  const res = items[0].json;\n  const headers = res.headers || {};\n  const raw = headers['set-cookie'] || headers['Set-Cookie'] || [];\n  const cookies = Array.isArray(raw) ? raw : [raw];\n  const session = cookies.map((c) => String(c).split(';')[0].trim()).find((c) => c.startsWith('PORTALSESSID='));\n\n  if (![302, 303].includes(res.statusCode) || !session) {\n    throw new Error(`[PORTAL_LOGIN_FAILED] login answered ${res.statusCode} without a session cookie`);\n  }\n  return [{ json: { cookie: session, logged_in_at: new Date().toISOString() } }];\n}\n\nmodule.exports = { run };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/portal-session.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Read session) \");\n  throw e;\n}"
+      },
+      "id": "55cae213-4f09-49c3-ac0c-7bcf8cd6c9a8",
+      "name": "Read session",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Load settings').first().json.settings.portal_base_url }}/applications/{{ $('Start').first().json.application_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cookie",
+              "value": "={{ $json.cookie }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "6f500a5f-2476-4b7c-ae45-da867e58a15b",
+      "name": "Fetch application page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/session-guard.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/session-guard.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Check session\" / \"Check session again\".\n// An expired portal session does not return 401. It redirects to the login\n// page, which arrives as HTTP 200, and an HTML extractor would happily read it\n// as an application with every field empty. The page marker decides instead.\n\nfunction pageMarker(html) {\n  const m = String(html).match(/<body[^>]*\\sdata-page=\"([^\"]+)\"/i);\n  return m ? m[1] : 'unknown';\n}\n\nfunction run(items, ctx, options = {}) {\n  const html = String(items[0].json.data || '');\n  const page = pageMarker(html);\n\n  if (page === 'login') {\n    if (options.strict) {\n      throw new Error('[SESSION_EXPIRED] the portal returned its login page again right after a fresh login');\n    }\n    return [{ json: { state: 'expired', html: '' } }];\n  }\n  if (page !== 'application-detail') {\n    throw new Error(`[PORTAL_LAYOUT_CHANGED] expected the application page, got page marker \"${page}\"`);\n  }\n  return [{ json: { state: 'ok', html } }];\n}\n\nmodule.exports = { run, pageMarker };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/session-guard.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Check session) \");\n  throw e;\n}"
+      },
+      "id": "7c5e9be3-f5fc-45b7-a3dd-057592bf9b38",
+      "name": "Check session",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a7fadd9a-8a9c-4320-a65d-5d606f23714c",
+              "leftValue": "={{ $json.state }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "expired"
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "9a8218da-d822-4210-aeb8-0182670253b4",
+      "name": "Session expired?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1840,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Load settings').first().json.settings.portal_base_url }}/login",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "3748d0cb-9dfd-4baf-a45f-b6e54f5e1eae",
+      "name": "Log in again",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2040,
+        120
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "credPortalLogin1",
+          "name": "Portal service account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/portal-session.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/portal-session.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Read session\" / \"Read new session\".\n// The portal answers a good login with a 303 and a PORTALSESSID cookie, and a\n// bad one with 200 and the login form again. Only the first counts.\n\nfunction run(items) {\n  const res = items[0].json;\n  const headers = res.headers || {};\n  const raw = headers['set-cookie'] || headers['Set-Cookie'] || [];\n  const cookies = Array.isArray(raw) ? raw : [raw];\n  const session = cookies.map((c) => String(c).split(';')[0].trim()).find((c) => c.startsWith('PORTALSESSID='));\n\n  if (![302, 303].includes(res.statusCode) || !session) {\n    throw new Error(`[PORTAL_LOGIN_FAILED] login answered ${res.statusCode} without a session cookie`);\n  }\n  return [{ json: { cookie: session, logged_in_at: new Date().toISOString() } }];\n}\n\nmodule.exports = { run };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/portal-session.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Read new session) \");\n  throw e;\n}"
+      },
+      "id": "d80f646f-5263-45a4-abff-0e00a2c1fdb7",
+      "name": "Read new session",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Load settings').first().json.settings.portal_base_url }}/applications/{{ $('Start').first().json.application_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cookie",
+              "value": "={{ $json.cookie }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "23cf16f6-3169-4168-aab6-c3c1ac94978b",
+      "name": "Refetch application page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2440,
+        120
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/session-guard.js {\"strict\":true}\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/session-guard.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Check session\" / \"Check session again\".\n// An expired portal session does not return 401. It redirects to the login\n// page, which arrives as HTTP 200, and an HTML extractor would happily read it\n// as an application with every field empty. The page marker decides instead.\n\nfunction pageMarker(html) {\n  const m = String(html).match(/<body[^>]*\\sdata-page=\"([^\"]+)\"/i);\n  return m ? m[1] : 'unknown';\n}\n\nfunction run(items, ctx, options = {}) {\n  const html = String(items[0].json.data || '');\n  const page = pageMarker(html);\n\n  if (page === 'login') {\n    if (options.strict) {\n      throw new Error('[SESSION_EXPIRED] the portal returned its login page again right after a fresh login');\n    }\n    return [{ json: { state: 'expired', html: '' } }];\n  }\n  if (page !== 'application-detail') {\n    throw new Error(`[PORTAL_LAYOUT_CHANGED] expected the application page, got page marker \"${page}\"`);\n  }\n  return [{ json: { state: 'ok', html } }];\n}\n\nmodule.exports = { run, pageMarker };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/session-guard.js\").run($input.all(), __ctx, {\"strict\":true});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Check session again) \");\n  throw e;\n}"
+      },
+      "id": "454ceb40-170d-4457-ac49-2db588769537",
+      "name": "Check session again",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/raise-step-error.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/raise-step-error.js\": [function (module, exports, require) {\n'use strict';\n// Code nodes \"Login or page fetch failed\", \"Requisition or resume fetch failed\",\n// \"Model call failed\" and \"Render failed\".\n// Every HTTP node in the screening workflow retries on its own first. When it\n// still fails, its error output lands here. n8n would otherwise surface the\n// failure to the caller as a generic \"The service failed to process your\n// request\", losing which step failed and the status code. This re-throws it\n// tagged, so the dead letter says exactly what broke and whether a replay can\n// fix it.\n\nconst STEP_CODES = {\n  'Fetch application page': 'PORTAL_UNAVAILABLE',\n  'Refetch application page': 'PORTAL_UNAVAILABLE',\n  'Fetch requisition page': 'PORTAL_UNAVAILABLE',\n  'Download resume': 'PORTAL_UNAVAILABLE',\n  'Portal login': 'PORTAL_UNAVAILABLE',\n  'Log in again': 'PORTAL_UNAVAILABLE',\n  'Extract resume text': 'DOCSVC_UNAVAILABLE',\n  'Render Word submittal': 'DOCSVC_UNAVAILABLE',\n  'Claude: rate criteria': 'LLM_UNAVAILABLE',\n};\n\nfunction describe(error) {\n  if (!error) return { status: null, message: 'no error detail' };\n  if (typeof error === 'string') {\n    const status = (error.match(/\\b([45]\\d\\d)\\b/) || [])[1];\n    return { status: status ? Number(status) : null, message: error };\n  }\n  const status = Number(error.httpCode || error.status || (String(error.message || '').match(/\\b([45]\\d\\d)\\b/) || [])[1]) || null;\n  const message = [error.message, error.description].filter(Boolean).join(' | ');\n  return { status, message: message || JSON.stringify(error).slice(0, 300) };\n}\n\nfunction codeFor(step, status) {\n  const base = STEP_CODES[step] || 'STEP_FAILED';\n  // A 4xx from the model API is a request problem a replay will not fix.\n  if (base === 'LLM_UNAVAILABLE' && status && status >= 400 && status < 500 && status !== 408 && status !== 429) return 'LLM_REQUEST_REJECTED';\n  return base;\n}\n\nfunction run(items, ctx) {\n  const step = ctx.prevNode || 'unknown step';\n  const { status, message } = describe(items[0] && items[0].json && items[0].json.error);\n  const code = codeFor(step, status);\n  throw new Error(`[${code}] (node: ${step}) ${status ? `HTTP ${status} ` : ''}after retries: ${message}`.slice(0, 1000));\n}\n\nmodule.exports = { run, describe, codeFor, STEP_CODES };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/raise-step-error.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Login or page fetch failed) \");\n  throw e;\n}"
+      },
+      "id": "54e9badc-69ad-4ff4-a6da-267636d62f8f",
+      "name": "Login or page fetch failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        510
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "sourceData": "json",
+        "dataPropertyName": "html",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "application_id",
+              "cssSelector": "#application-id",
+              "returnValue": "text"
+            },
+            {
+              "key": "requisition_id",
+              "cssSelector": "#requisition-id",
+              "returnValue": "text"
+            },
+            {
+              "key": "received_at",
+              "cssSelector": "time.received",
+              "returnValue": "attribute",
+              "attribute": "datetime"
+            },
+            {
+              "key": "portal_status",
+              "cssSelector": "#current-status",
+              "returnValue": "text"
+            },
+            {
+              "key": "csrf_token",
+              "cssSelector": "#status-form input[name=\"_csrf\"]",
+              "returnValue": "value"
+            },
+            {
+              "key": "name",
+              "cssSelector": "#candidate-name",
+              "returnValue": "text"
+            },
+            {
+              "key": "email",
+              "cssSelector": ".field-email",
+              "returnValue": "text"
+            },
+            {
+              "key": "phone",
+              "cssSelector": ".field-phone",
+              "returnValue": "text"
+            },
+            {
+              "key": "home_state",
+              "cssSelector": ".field-home-state",
+              "returnValue": "text"
+            },
+            {
+              "key": "license_state",
+              "cssSelector": ".field-license-state",
+              "returnValue": "text"
+            },
+            {
+              "key": "license_type",
+              "cssSelector": ".field-license-type",
+              "returnValue": "text"
+            },
+            {
+              "key": "specialty",
+              "cssSelector": ".field-specialty",
+              "returnValue": "text"
+            },
+            {
+              "key": "years",
+              "cssSelector": ".field-years",
+              "returnValue": "text"
+            },
+            {
+              "key": "shift",
+              "cssSelector": ".field-shift",
+              "returnValue": "text"
+            },
+            {
+              "key": "attachment_urls",
+              "cssSelector": "a.attachment",
+              "returnValue": "attribute",
+              "attribute": "href",
+              "returnArray": true
+            },
+            {
+              "key": "attachment_kinds",
+              "cssSelector": "a.attachment",
+              "returnValue": "attribute",
+              "attribute": "data-kind",
+              "returnArray": true
+            },
+            {
+              "key": "attachment_names",
+              "cssSelector": "a.attachment",
+              "returnValue": "text",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {
+          "trimValues": true,
+          "cleanUpText": false
+        }
+      },
+      "id": "468a0313-4cb9-4933-aeb6-ca77acee4071",
+      "name": "Extract application fields",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        2840,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/normalize-application.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/normalize-application.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Normalize application\".\n// Turns the HTML node's raw selector output into an application.v1 record.\n// A selector that returns nothing is a layout change, and it stops the run\n// here with the names of the selectors that broke.\nconst { assertValid } = require('../lib/contract');\nconst { applicationV1 } = require('../lib/schemas');\n\nconst REQUIRED_FIELDS = [\n  'application_id', 'requisition_id', 'received_at', 'portal_status', 'csrf_token',\n  'name', 'email', 'phone', 'home_state', 'license_state', 'license_type', 'specialty', 'years', 'shift',\n];\n\nconst asArray = (v) => (Array.isArray(v) ? v : v === undefined || v === null || v === '' ? [] : [v]);\nconst isEmpty = (v) => v === undefined || v === null || String(v).trim() === '';\n\nfunction shiftValue(raw) {\n  const s = String(raw).toLowerCase();\n  if (s.includes('night')) return 'nights';\n  if (s.includes('day')) return 'days';\n  return 'any';\n}\n\n// Whitespace is collapsed here rather than by the HTML node's \"clean up text\"\n// option, which joins wrapped lines without a space (see normalize-requisition).\nconst clean = (v) => (typeof v === 'string' ? v.replace(/\\s+/g, ' ').trim() : Array.isArray(v) ? v.map(clean) : v);\n\nfunction run(items, ctx) {\n  const f = Object.fromEntries(Object.entries(items[0].json).map(([k, v]) => [k, clean(v)]));\n  const requested = ctx.node('Start').application_id;\n  const relogged = ctx.executed('Read new session');\n  const cookie = ctx.node(relogged ? 'Read new session' : 'Read session').cookie;\n\n  const missing = REQUIRED_FIELDS.filter((k) => isEmpty(f[k]));\n  if (missing.length) {\n    throw new Error(`[PORTAL_LAYOUT_CHANGED] selectors returned nothing for: ${missing.join(', ')}`);\n  }\n  if (f.application_id !== requested) {\n    throw new Error(`[PORTAL_WRONG_RECORD] asked for ${requested}, the page shows ${f.application_id}`);\n  }\n\n  const urls = asArray(f.attachment_urls);\n  const kinds = asArray(f.attachment_kinds);\n  const names = asArray(f.attachment_names);\n  const attachments = urls.map((url, i) => ({ kind: kinds[i] || 'other', url, filename: names[i] || `attachment-${i + 1}` }));\n\n  const application = {\n    schema_version: 'application.v1',\n    application_id: f.application_id,\n    requisition_id: f.requisition_id,\n    received_at: f.received_at,\n    portal_status: f.portal_status,\n    csrf_token: f.csrf_token,\n    candidate: {\n      name: f.name,\n      email: f.email,\n      phone: f.phone,\n      home_state: String(f.home_state).toUpperCase(),\n      license_state: String(f.license_state).toUpperCase(),\n      license_multistate: /multistate|compact/i.test(f.license_type),\n      specialty: f.specialty,\n      years_experience: Number(String(f.years).replace(/[^0-9.]/g, '')),\n      shift_preference: shiftValue(f.shift),\n    },\n    attachments,\n  };\n  assertValid(applicationV1, application, 'application.v1', 'PORTAL_CONTRACT_VIOLATION');\n  return [{ json: { application, cookie, relogged } }];\n}\n\nmodule.exports = { run };\n}, {\"../lib/contract\":\"src/lib/contract.js\",\"../lib/schemas\":\"src/lib/schemas.js\"}],\n\"src/lib/contract.js\": [function (module, exports, require) {\n'use strict';\n// A small JSON Schema subset validator. It runs inside n8n Code nodes, where\n// npm packages are not available, so it is dependency free. It supports the\n// keywords the contracts in schemas.js use and nothing else.\n\nclass ContractError extends Error {\n  constructor(code, contract, errors) {\n    const first = errors.slice(0, 3).map((e) => `${e.path || '/'} ${e.message}`).join('; ');\n    super(`[${code}] ${contract}: ${first}${errors.length > 3 ? ` (+${errors.length - 3} more)` : ''}`);\n    this.name = 'ContractError';\n    this.code = code;\n    this.contract = contract;\n    this.errors = errors;\n  }\n}\n\nfunction typeOf(value) {\n  if (value === null) return 'null';\n  if (Array.isArray(value)) return 'array';\n  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number';\n  return typeof value;\n}\n\nfunction typeMatches(expected, actual) {\n  if (expected === actual) return true;\n  return expected === 'number' && actual === 'integer';\n}\n\nfunction validate(schema, value, path = '', errors = []) {\n  const actual = typeOf(value);\n\n  if (schema.type) {\n    const types = Array.isArray(schema.type) ? schema.type : [schema.type];\n    if (!types.some((t) => typeMatches(t, actual))) {\n      errors.push({ path, message: `must be ${types.join(' or ')}, got ${actual}` });\n      return errors;\n    }\n  }\n  if ('const' in schema && value !== schema.const) {\n    errors.push({ path, message: `must equal ${JSON.stringify(schema.const)}` });\n  }\n  if (schema.enum && !schema.enum.includes(value)) {\n    errors.push({ path, message: `must be one of ${schema.enum.map((v) => JSON.stringify(v)).join(', ')}` });\n  }\n\n  if (actual === 'string') {\n    if (schema.minLength !== undefined && value.length < schema.minLength) {\n      errors.push({ path, message: `must be at least ${schema.minLength} characters` });\n    }\n    if (schema.maxLength !== undefined && value.length > schema.maxLength) {\n      errors.push({ path, message: `must be at most ${schema.maxLength} characters` });\n    }\n    if (schema.pattern && !new RegExp(schema.pattern).test(value)) {\n      errors.push({ path, message: `must match ${schema.pattern}` });\n    }\n  }\n\n  if (actual === 'integer' || actual === 'number') {\n    if (schema.minimum !== undefined && value < schema.minimum) {\n      errors.push({ path, message: `must be >= ${schema.minimum}` });\n    }\n    if (schema.maximum !== undefined && value > schema.maximum) {\n      errors.push({ path, message: `must be <= ${schema.maximum}` });\n    }\n  }\n\n  if (actual === 'array') {\n    if (schema.minItems !== undefined && value.length < schema.minItems) {\n      errors.push({ path, message: `must have at least ${schema.minItems} items` });\n    }\n    if (schema.maxItems !== undefined && value.length > schema.maxItems) {\n      errors.push({ path, message: `must have at most ${schema.maxItems} items` });\n    }\n    if (schema.items) value.forEach((item, i) => validate(schema.items, item, `${path}/${i}`, errors));\n  }\n\n  if (actual === 'object') {\n    const props = schema.properties || {};\n    for (const key of schema.required || []) {\n      if (!(key in value) || value[key] === undefined) errors.push({ path: `${path}/${key}`, message: 'is required' });\n    }\n    for (const [key, child] of Object.entries(value)) {\n      if (props[key]) validate(props[key], child, `${path}/${key}`, errors);\n      else if (schema.additionalProperties === false) errors.push({ path: `${path}/${key}`, message: 'is not allowed' });\n    }\n  }\n  return errors;\n}\n\nfunction assertValid(schema, value, contract, code = 'CONTRACT_VIOLATION') {\n  const errors = validate(schema, value);\n  if (errors.length) throw new ContractError(code, contract, errors);\n  return value;\n}\n\n// Structured outputs accept the structural part of JSON Schema but not range or\n// length keywords. The API gets the structure; assertValid enforces the rest.\nconst API_UNSUPPORTED = ['minimum', 'maximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', '$id'];\n\nfunction toApiSchema(schema) {\n  if (Array.isArray(schema)) return schema.map(toApiSchema);\n  if (!schema || typeof schema !== 'object') return schema;\n  const out = {};\n  for (const [key, value] of Object.entries(schema)) {\n    if (API_UNSUPPORTED.includes(key)) continue;\n    out[key] = key === 'properties'\n      ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, toApiSchema(v)]))\n      : toApiSchema(value);\n  }\n  return out;\n}\n\nmodule.exports = { ContractError, validate, assertValid, toApiSchema };\n}, {}],\n\"src/lib/schemas.js\": [function (module, exports, require) {\n'use strict';\n// Versioned contracts between workflow steps. Every Code node that produces one\n// of these shapes validates it before handing it on, so a portal layout change\n// or a malformed model reply stops the run with a reason code instead of\n// travelling downstream as empty fields.\n\nconst STATUSES = ['Shortlisted', 'Recruiter review', 'Low match', 'Screened out', 'Incomplete', 'Manual review'];\nconst BANDS = ['Shortlisted', 'Recruiter review', 'Low match'];\nconst ATTACHMENT_KINDS = ['resume', 'license', 'certification', 'other'];\n\nconst applicationV1 = {\n  $id: 'application.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition_id', 'received_at', 'portal_status', 'csrf_token', 'candidate', 'attachments'],\n  properties: {\n    schema_version: { const: 'application.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    received_at: { type: 'string', pattern: '^\\\\d{4}-\\\\d{2}-\\\\d{2}T' },\n    portal_status: { type: 'string', minLength: 1 },\n    csrf_token: { type: 'string', minLength: 16 },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'email', 'phone', 'home_state', 'license_state', 'license_multistate', 'specialty', 'years_experience', 'shift_preference'],\n      properties: {\n        name: { type: 'string', minLength: 2, maxLength: 120 },\n        email: { type: 'string', pattern: '^[^@\\\\s]+@[^@\\\\s]+$' },\n        phone: { type: 'string', minLength: 7 },\n        home_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_multistate: { type: 'boolean' },\n        specialty: { type: 'string', minLength: 2 },\n        years_experience: { type: 'number', minimum: 0, maximum: 60 },\n        shift_preference: { enum: ['days', 'nights', 'any'] },\n      },\n    },\n    attachments: {\n      type: 'array',\n      maxItems: 10,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['kind', 'url', 'filename'],\n        properties: {\n          kind: { enum: ATTACHMENT_KINDS },\n          url: { type: 'string', pattern: '^/attachments/\\\\d+$' },\n          filename: { type: 'string', minLength: 1 },\n        },\n      },\n    },\n  },\n};\n\nconst requisitionV1 = {\n  $id: 'requisition.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'requisition_id', 'title', 'facility', 'boolean_screen', 'required_documents', 'criteria', 'recruiter_email', 'account_manager_email'],\n  properties: {\n    schema_version: { const: 'requisition.v1' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    title: { type: 'string', minLength: 3 },\n    facility: { type: 'string', minLength: 3 },\n    boolean_screen: { type: 'string', minLength: 3 },\n    required_documents: { type: 'array', items: { enum: ATTACHMENT_KINDS } },\n    criteria: {\n      type: 'array',\n      minItems: 2,\n      maxItems: 8,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          text: { type: 'string', minLength: 10 },\n          weight: { type: 'integer', minimum: 1, maximum: 3 },\n          must_have: { type: 'boolean' },\n        },\n      },\n    },\n    recruiter_email: { type: 'string', pattern: '@' },\n    account_manager_email: { type: 'string', pattern: '@' },\n  },\n};\n\nconst prefilterV1 = {\n  $id: 'prefilter.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['outcome', 'boolean_passed', 'failed_clauses', 'matched_terms', 'missing_documents'],\n  properties: {\n    outcome: { enum: ['score', 'screened_out', 'incomplete', 'unreadable'] },\n    boolean_passed: { type: ['boolean', 'null'] },\n    failed_clauses: { type: 'array', items: { type: 'string' } },\n    matched_terms: { type: 'array', items: { type: 'string' } },\n    missing_documents: { type: 'array', items: { type: 'string' } },\n  },\n};\n\n// What the model must return. Sent to the API as the structured-output schema\n// (structure only, see toApiSchema) and enforced in full by the Code node.\nconst modelOutputV1 = {\n  $id: 'model_output.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['criteria', 'summary', 'concerns'],\n  properties: {\n    criteria: {\n      type: 'array',\n      minItems: 1,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'rating', 'evidence'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string', maxLength: 400 },\n        },\n      },\n    },\n    summary: { type: 'string', minLength: 20, maxLength: 900 },\n    concerns: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 300 } },\n  },\n};\n\nconst screeningV1 = {\n  $id: 'screening.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['score', 'band', 'criteria', 'ungrounded', 'must_have_gaps', 'summary', 'concerns', 'model', 'prompt_version'],\n  properties: {\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    band: { enum: BANDS },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have', 'rating', 'evidence', 'grounded'],\n        properties: {\n          id: { type: 'string' },\n          text: { type: 'string' },\n          weight: { type: 'integer' },\n          must_have: { type: 'boolean' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string' },\n          grounded: { type: 'boolean' },\n        },\n      },\n    },\n    ungrounded: { type: 'integer', minimum: 0 },\n    must_have_gaps: { type: 'array', items: { type: 'string' } },\n    summary: { type: 'string' },\n    concerns: { type: 'array', items: { type: 'string' } },\n    model: { type: 'string', minLength: 1 },\n    prompt_version: { type: 'string', minLength: 1 },\n  },\n};\n\nconst submittalV1 = {\n  $id: 'submittal.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition', 'candidate', 'score', 'criteria', 'summary', 'generated_at'],\n  properties: {\n    schema_version: { const: 'submittal.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['id', 'title', 'facility'],\n      properties: { id: { type: 'string' }, title: { type: 'string' }, facility: { type: 'string' } },\n    },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'specialty', 'years_experience', 'license', 'shift_preference'],\n      properties: {\n        name: { type: 'string' },\n        specialty: { type: 'string' },\n        years_experience: { type: 'number' },\n        license: { type: 'string' },\n        shift_preference: { type: 'string' },\n      },\n    },\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['text', 'rating_label', 'evidence'],\n        properties: { text: { type: 'string' }, rating_label: { type: 'string' }, evidence: { type: 'string' } },\n      },\n    },\n    summary: { type: 'string' },\n    generated_at: { type: 'string' },\n  },\n};\n\nmodule.exports = { STATUSES, BANDS, applicationV1, requisitionV1, prefilterV1, modelOutputV1, screeningV1, submittalV1 };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/normalize-application.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Normalize application) \");\n  throw e;\n}"
+      },
+      "id": "b487a1f2-bffe-4250-a8df-3ddb7267dca0",
+      "name": "Normalize application",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Load settings').first().json.settings.portal_base_url }}/requisitions/{{ $json.application.requisition_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cookie",
+              "value": "={{ $json.cookie }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "6a855686-39c5-4b00-a83c-11014a38a829",
+      "name": "Fetch requisition page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        1300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "sourceData": "json",
+        "dataPropertyName": "data",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "requisition_id",
+              "cssSelector": "#requisition-id",
+              "returnValue": "text"
+            },
+            {
+              "key": "title",
+              "cssSelector": "#requisition-title",
+              "returnValue": "text"
+            },
+            {
+              "key": "facility",
+              "cssSelector": ".field-facility",
+              "returnValue": "text"
+            },
+            {
+              "key": "boolean_screen",
+              "cssSelector": "#boolean-screen",
+              "returnValue": "text"
+            },
+            {
+              "key": "required_documents",
+              "cssSelector": ".field-required-documents",
+              "returnValue": "text"
+            },
+            {
+              "key": "recruiter_email",
+              "cssSelector": ".field-recruiter-email",
+              "returnValue": "text"
+            },
+            {
+              "key": "account_manager_email",
+              "cssSelector": ".field-account-manager-email",
+              "returnValue": "text"
+            },
+            {
+              "key": "criteria_ids",
+              "cssSelector": "li.criterion",
+              "returnValue": "attribute",
+              "attribute": "data-id",
+              "returnArray": true
+            },
+            {
+              "key": "criteria_weights",
+              "cssSelector": "li.criterion",
+              "returnValue": "attribute",
+              "attribute": "data-weight",
+              "returnArray": true
+            },
+            {
+              "key": "criteria_must",
+              "cssSelector": "li.criterion",
+              "returnValue": "attribute",
+              "attribute": "data-must-have",
+              "returnArray": true
+            },
+            {
+              "key": "criteria_texts",
+              "cssSelector": "li.criterion .criterion-text",
+              "returnValue": "text",
+              "returnArray": true
+            }
+          ]
+        },
+        "options": {
+          "trimValues": true,
+          "cleanUpText": false
+        }
+      },
+      "id": "4cdc14b4-1dc1-4a00-a6e3-523fafc82ed0",
+      "name": "Extract requisition fields",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/normalize-requisition.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/normalize-requisition.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Normalize requisition\".\n// Builds requisition.v1 from the requisition page and works out which required\n// documents the application is missing.\nconst { assertValid } = require('../lib/contract');\nconst { requisitionV1 } = require('../lib/schemas');\n\nconst asArray = (v) => (Array.isArray(v) ? v : v === undefined || v === null || v === '' ? [] : [v]);\n\n// The HTML node converts text with html-to-text, which wraps at 80 columns.\n// Its \"clean up text\" option then deletes the line breaks without a space,\n// gluing \"AND years>=1\" into \"ANDyears>=1\". That option is off on the node,\n// and whitespace is collapsed here instead.\nconst clean = (v) => (typeof v === 'string' ? v.replace(/\\s+/g, ' ').trim() : Array.isArray(v) ? v.map(clean) : v);\n\nfunction run(items, ctx) {\n  const f = Object.fromEntries(Object.entries(items[0].json).map(([k, v]) => [k, clean(v)]));\n  const { application, cookie, relogged } = ctx.node('Normalize application');\n\n  const ids = asArray(f.criteria_ids);\n  const texts = asArray(f.criteria_texts);\n  const weights = asArray(f.criteria_weights);\n  const must = asArray(f.criteria_must);\n\n  const requisition = {\n    schema_version: 'requisition.v1',\n    requisition_id: f.requisition_id,\n    title: f.title,\n    facility: f.facility,\n    boolean_screen: f.boolean_screen,\n    required_documents: String(f.required_documents || '')\n      .split(',')\n      .map((s) => s.trim().toLowerCase())\n      .filter(Boolean),\n    criteria: ids.map((id, i) => ({\n      id,\n      text: texts[i],\n      weight: Number(weights[i]),\n      must_have: String(must[i]) === 'true',\n    })),\n    recruiter_email: f.recruiter_email,\n    account_manager_email: f.account_manager_email,\n  };\n  assertValid(requisitionV1, requisition, 'requisition.v1', 'PORTAL_CONTRACT_VIOLATION');\n\n  if (requisition.requisition_id !== application.requisition_id) {\n    throw new Error(`[PORTAL_WRONG_RECORD] application points at ${application.requisition_id}, page shows ${requisition.requisition_id}`);\n  }\n\n  const kinds = new Set(application.attachments.map((a) => a.kind));\n  const missing_documents = requisition.required_documents.filter((d) => !kinds.has(d));\n  const resume = application.attachments.find((a) => a.kind === 'resume');\n\n  return [{\n    json: {\n      application,\n      requisition,\n      cookie,\n      relogged,\n      missing_documents,\n      resume_url: resume ? resume.url : null,\n    },\n  }];\n}\n\nmodule.exports = { run };\n}, {\"../lib/contract\":\"src/lib/contract.js\",\"../lib/schemas\":\"src/lib/schemas.js\"}],\n\"src/lib/contract.js\": [function (module, exports, require) {\n'use strict';\n// A small JSON Schema subset validator. It runs inside n8n Code nodes, where\n// npm packages are not available, so it is dependency free. It supports the\n// keywords the contracts in schemas.js use and nothing else.\n\nclass ContractError extends Error {\n  constructor(code, contract, errors) {\n    const first = errors.slice(0, 3).map((e) => `${e.path || '/'} ${e.message}`).join('; ');\n    super(`[${code}] ${contract}: ${first}${errors.length > 3 ? ` (+${errors.length - 3} more)` : ''}`);\n    this.name = 'ContractError';\n    this.code = code;\n    this.contract = contract;\n    this.errors = errors;\n  }\n}\n\nfunction typeOf(value) {\n  if (value === null) return 'null';\n  if (Array.isArray(value)) return 'array';\n  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number';\n  return typeof value;\n}\n\nfunction typeMatches(expected, actual) {\n  if (expected === actual) return true;\n  return expected === 'number' && actual === 'integer';\n}\n\nfunction validate(schema, value, path = '', errors = []) {\n  const actual = typeOf(value);\n\n  if (schema.type) {\n    const types = Array.isArray(schema.type) ? schema.type : [schema.type];\n    if (!types.some((t) => typeMatches(t, actual))) {\n      errors.push({ path, message: `must be ${types.join(' or ')}, got ${actual}` });\n      return errors;\n    }\n  }\n  if ('const' in schema && value !== schema.const) {\n    errors.push({ path, message: `must equal ${JSON.stringify(schema.const)}` });\n  }\n  if (schema.enum && !schema.enum.includes(value)) {\n    errors.push({ path, message: `must be one of ${schema.enum.map((v) => JSON.stringify(v)).join(', ')}` });\n  }\n\n  if (actual === 'string') {\n    if (schema.minLength !== undefined && value.length < schema.minLength) {\n      errors.push({ path, message: `must be at least ${schema.minLength} characters` });\n    }\n    if (schema.maxLength !== undefined && value.length > schema.maxLength) {\n      errors.push({ path, message: `must be at most ${schema.maxLength} characters` });\n    }\n    if (schema.pattern && !new RegExp(schema.pattern).test(value)) {\n      errors.push({ path, message: `must match ${schema.pattern}` });\n    }\n  }\n\n  if (actual === 'integer' || actual === 'number') {\n    if (schema.minimum !== undefined && value < schema.minimum) {\n      errors.push({ path, message: `must be >= ${schema.minimum}` });\n    }\n    if (schema.maximum !== undefined && value > schema.maximum) {\n      errors.push({ path, message: `must be <= ${schema.maximum}` });\n    }\n  }\n\n  if (actual === 'array') {\n    if (schema.minItems !== undefined && value.length < schema.minItems) {\n      errors.push({ path, message: `must have at least ${schema.minItems} items` });\n    }\n    if (schema.maxItems !== undefined && value.length > schema.maxItems) {\n      errors.push({ path, message: `must have at most ${schema.maxItems} items` });\n    }\n    if (schema.items) value.forEach((item, i) => validate(schema.items, item, `${path}/${i}`, errors));\n  }\n\n  if (actual === 'object') {\n    const props = schema.properties || {};\n    for (const key of schema.required || []) {\n      if (!(key in value) || value[key] === undefined) errors.push({ path: `${path}/${key}`, message: 'is required' });\n    }\n    for (const [key, child] of Object.entries(value)) {\n      if (props[key]) validate(props[key], child, `${path}/${key}`, errors);\n      else if (schema.additionalProperties === false) errors.push({ path: `${path}/${key}`, message: 'is not allowed' });\n    }\n  }\n  return errors;\n}\n\nfunction assertValid(schema, value, contract, code = 'CONTRACT_VIOLATION') {\n  const errors = validate(schema, value);\n  if (errors.length) throw new ContractError(code, contract, errors);\n  return value;\n}\n\n// Structured outputs accept the structural part of JSON Schema but not range or\n// length keywords. The API gets the structure; assertValid enforces the rest.\nconst API_UNSUPPORTED = ['minimum', 'maximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', '$id'];\n\nfunction toApiSchema(schema) {\n  if (Array.isArray(schema)) return schema.map(toApiSchema);\n  if (!schema || typeof schema !== 'object') return schema;\n  const out = {};\n  for (const [key, value] of Object.entries(schema)) {\n    if (API_UNSUPPORTED.includes(key)) continue;\n    out[key] = key === 'properties'\n      ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, toApiSchema(v)]))\n      : toApiSchema(value);\n  }\n  return out;\n}\n\nmodule.exports = { ContractError, validate, assertValid, toApiSchema };\n}, {}],\n\"src/lib/schemas.js\": [function (module, exports, require) {\n'use strict';\n// Versioned contracts between workflow steps. Every Code node that produces one\n// of these shapes validates it before handing it on, so a portal layout change\n// or a malformed model reply stops the run with a reason code instead of\n// travelling downstream as empty fields.\n\nconst STATUSES = ['Shortlisted', 'Recruiter review', 'Low match', 'Screened out', 'Incomplete', 'Manual review'];\nconst BANDS = ['Shortlisted', 'Recruiter review', 'Low match'];\nconst ATTACHMENT_KINDS = ['resume', 'license', 'certification', 'other'];\n\nconst applicationV1 = {\n  $id: 'application.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition_id', 'received_at', 'portal_status', 'csrf_token', 'candidate', 'attachments'],\n  properties: {\n    schema_version: { const: 'application.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    received_at: { type: 'string', pattern: '^\\\\d{4}-\\\\d{2}-\\\\d{2}T' },\n    portal_status: { type: 'string', minLength: 1 },\n    csrf_token: { type: 'string', minLength: 16 },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'email', 'phone', 'home_state', 'license_state', 'license_multistate', 'specialty', 'years_experience', 'shift_preference'],\n      properties: {\n        name: { type: 'string', minLength: 2, maxLength: 120 },\n        email: { type: 'string', pattern: '^[^@\\\\s]+@[^@\\\\s]+$' },\n        phone: { type: 'string', minLength: 7 },\n        home_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_multistate: { type: 'boolean' },\n        specialty: { type: 'string', minLength: 2 },\n        years_experience: { type: 'number', minimum: 0, maximum: 60 },\n        shift_preference: { enum: ['days', 'nights', 'any'] },\n      },\n    },\n    attachments: {\n      type: 'array',\n      maxItems: 10,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['kind', 'url', 'filename'],\n        properties: {\n          kind: { enum: ATTACHMENT_KINDS },\n          url: { type: 'string', pattern: '^/attachments/\\\\d+$' },\n          filename: { type: 'string', minLength: 1 },\n        },\n      },\n    },\n  },\n};\n\nconst requisitionV1 = {\n  $id: 'requisition.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'requisition_id', 'title', 'facility', 'boolean_screen', 'required_documents', 'criteria', 'recruiter_email', 'account_manager_email'],\n  properties: {\n    schema_version: { const: 'requisition.v1' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    title: { type: 'string', minLength: 3 },\n    facility: { type: 'string', minLength: 3 },\n    boolean_screen: { type: 'string', minLength: 3 },\n    required_documents: { type: 'array', items: { enum: ATTACHMENT_KINDS } },\n    criteria: {\n      type: 'array',\n      minItems: 2,\n      maxItems: 8,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          text: { type: 'string', minLength: 10 },\n          weight: { type: 'integer', minimum: 1, maximum: 3 },\n          must_have: { type: 'boolean' },\n        },\n      },\n    },\n    recruiter_email: { type: 'string', pattern: '@' },\n    account_manager_email: { type: 'string', pattern: '@' },\n  },\n};\n\nconst prefilterV1 = {\n  $id: 'prefilter.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['outcome', 'boolean_passed', 'failed_clauses', 'matched_terms', 'missing_documents'],\n  properties: {\n    outcome: { enum: ['score', 'screened_out', 'incomplete', 'unreadable'] },\n    boolean_passed: { type: ['boolean', 'null'] },\n    failed_clauses: { type: 'array', items: { type: 'string' } },\n    matched_terms: { type: 'array', items: { type: 'string' } },\n    missing_documents: { type: 'array', items: { type: 'string' } },\n  },\n};\n\n// What the model must return. Sent to the API as the structured-output schema\n// (structure only, see toApiSchema) and enforced in full by the Code node.\nconst modelOutputV1 = {\n  $id: 'model_output.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['criteria', 'summary', 'concerns'],\n  properties: {\n    criteria: {\n      type: 'array',\n      minItems: 1,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'rating', 'evidence'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string', maxLength: 400 },\n        },\n      },\n    },\n    summary: { type: 'string', minLength: 20, maxLength: 900 },\n    concerns: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 300 } },\n  },\n};\n\nconst screeningV1 = {\n  $id: 'screening.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['score', 'band', 'criteria', 'ungrounded', 'must_have_gaps', 'summary', 'concerns', 'model', 'prompt_version'],\n  properties: {\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    band: { enum: BANDS },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have', 'rating', 'evidence', 'grounded'],\n        properties: {\n          id: { type: 'string' },\n          text: { type: 'string' },\n          weight: { type: 'integer' },\n          must_have: { type: 'boolean' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string' },\n          grounded: { type: 'boolean' },\n        },\n      },\n    },\n    ungrounded: { type: 'integer', minimum: 0 },\n    must_have_gaps: { type: 'array', items: { type: 'string' } },\n    summary: { type: 'string' },\n    concerns: { type: 'array', items: { type: 'string' } },\n    model: { type: 'string', minLength: 1 },\n    prompt_version: { type: 'string', minLength: 1 },\n  },\n};\n\nconst submittalV1 = {\n  $id: 'submittal.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition', 'candidate', 'score', 'criteria', 'summary', 'generated_at'],\n  properties: {\n    schema_version: { const: 'submittal.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['id', 'title', 'facility'],\n      properties: { id: { type: 'string' }, title: { type: 'string' }, facility: { type: 'string' } },\n    },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'specialty', 'years_experience', 'license', 'shift_preference'],\n      properties: {\n        name: { type: 'string' },\n        specialty: { type: 'string' },\n        years_experience: { type: 'number' },\n        license: { type: 'string' },\n        shift_preference: { type: 'string' },\n      },\n    },\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['text', 'rating_label', 'evidence'],\n        properties: { text: { type: 'string' }, rating_label: { type: 'string' }, evidence: { type: 'string' } },\n      },\n    },\n    summary: { type: 'string' },\n    generated_at: { type: 'string' },\n  },\n};\n\nmodule.exports = { STATUSES, BANDS, applicationV1, requisitionV1, prefilterV1, modelOutputV1, screeningV1, submittalV1 };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/normalize-requisition.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Normalize requisition) \");\n  throw e;\n}"
+      },
+      "id": "abaa54b1-7a2e-4045-a7ba-b4396981621b",
+      "name": "Normalize requisition",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ef24a0d5-1ede-46db-a392-ca207337279a",
+              "leftValue": "={{ $json.resume_url }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "adb2c445-7bdf-43ed-ad31-c9399fc8c685",
+      "name": "Resume attached?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        840,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Load settings').first().json.settings.portal_base_url }}{{ $json.resume_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cookie",
+              "value": "={{ $json.cookie }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "f2b6604b-ce4d-4eca-a185-78daef46f2ad",
+      "name": "Download resume",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        1120
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Load settings').first().json.settings.docsvc_base_url }}/extract",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "e84aa5c0-5524-476b-aa21-3dda0755f9a0",
+      "name": "Extract resume text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1240,
+        1120
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/text-guard.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/text-guard.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Check resume text\".\n// A scanned resume is a picture of text, so extraction returns almost nothing.\n// The first version of this workflow sent that near-empty string to the model,\n// which scored it, confidently and low. Below the threshold the run goes to\n// Manual review and the model is never called.\nconst { sha256Hex } = require('../lib/sha256');\n\nfunction run(items, ctx) {\n  const res = items[0].json;\n  const settings = ctx.node('Load settings').settings;\n  const text = String(res.text || '').split(String.fromCharCode(0)).join('').trim();\n  const chars = text.replace(/\\s+/g, '').length;\n\n  return [{\n    json: {\n      readable: chars >= settings.min_resume_chars,\n      resume_text: text,\n      chars,\n      pages: res.pages || null,\n      format: res.format || null,\n      content_hash: sha256Hex(text),\n    },\n  }];\n}\n\nmodule.exports = { run };\n}, {\"../lib/sha256\":\"src/lib/sha256.js\"}],\n\"src/lib/sha256.js\": [function (module, exports, require) {\n'use strict';\n// Pure JavaScript SHA-256 over a UTF-8 string. n8n Code nodes cannot require\n// node:crypto unless the instance allow-lists it, and the content hash only\n// needs to be stable, so a small implementation keeps the nodes portable.\n\nconst K = [\n  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,\n  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,\n  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,\n  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,\n  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,\n  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,\n  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,\n  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,\n];\n\nfunction utf8Bytes(str) {\n  const out = [];\n  for (const ch of String(str)) {\n    let c = ch.codePointAt(0);\n    if (c < 0x80) out.push(c);\n    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));\n    else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));\n    else { out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63)); }\n  }\n  return out;\n}\n\nfunction sha256Hex(str) {\n  const bytes = utf8Bytes(str);\n  const bitLen = bytes.length * 8;\n  bytes.push(0x80);\n  while (bytes.length % 64 !== 56) bytes.push(0);\n  const hi = Math.floor(bitLen / 0x100000000);\n  const lo = bitLen >>> 0;\n  bytes.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255);\n  bytes.push((lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);\n\n  const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];\n  const W = new Array(64);\n  const rotr = (x, n) => (x >>> n) | (x << (32 - n));\n\n  for (let off = 0; off < bytes.length; off += 64) {\n    for (let t = 0; t < 16; t++) {\n      const b = off + t * 4;\n      W[t] = ((bytes[b] << 24) | (bytes[b + 1] << 16) | (bytes[b + 2] << 8) | bytes[b + 3]) >>> 0;\n    }\n    for (let t = 16; t < 64; t++) {\n      const s0 = rotr(W[t - 15], 7) ^ rotr(W[t - 15], 18) ^ (W[t - 15] >>> 3);\n      const s1 = rotr(W[t - 2], 17) ^ rotr(W[t - 2], 19) ^ (W[t - 2] >>> 10);\n      W[t] = (W[t - 16] + s0 + W[t - 7] + s1) >>> 0;\n    }\n    let [a, b, c, d, e, f, g, h] = H;\n    for (let t = 0; t < 64; t++) {\n      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);\n      const ch = (e & f) ^ (~e & g);\n      const t1 = (h + S1 + ch + K[t] + W[t]) >>> 0;\n      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);\n      const maj = (a & b) ^ (a & c) ^ (b & c);\n      const t2 = (S0 + maj) >>> 0;\n      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;\n    }\n    H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0; H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0;\n    H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0; H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;\n  }\n  return H.map((x) => x.toString(16).padStart(8, '0')).join('');\n}\n\nmodule.exports = { sha256Hex };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/text-guard.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Check resume text) \");\n  throw e;\n}"
+      },
+      "id": "ea47edfb-d81f-451d-a336-3763aed14ae4",
+      "name": "Check resume text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/raise-step-error.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/raise-step-error.js\": [function (module, exports, require) {\n'use strict';\n// Code nodes \"Login or page fetch failed\", \"Requisition or resume fetch failed\",\n// \"Model call failed\" and \"Render failed\".\n// Every HTTP node in the screening workflow retries on its own first. When it\n// still fails, its error output lands here. n8n would otherwise surface the\n// failure to the caller as a generic \"The service failed to process your\n// request\", losing which step failed and the status code. This re-throws it\n// tagged, so the dead letter says exactly what broke and whether a replay can\n// fix it.\n\nconst STEP_CODES = {\n  'Fetch application page': 'PORTAL_UNAVAILABLE',\n  'Refetch application page': 'PORTAL_UNAVAILABLE',\n  'Fetch requisition page': 'PORTAL_UNAVAILABLE',\n  'Download resume': 'PORTAL_UNAVAILABLE',\n  'Portal login': 'PORTAL_UNAVAILABLE',\n  'Log in again': 'PORTAL_UNAVAILABLE',\n  'Extract resume text': 'DOCSVC_UNAVAILABLE',\n  'Render Word submittal': 'DOCSVC_UNAVAILABLE',\n  'Claude: rate criteria': 'LLM_UNAVAILABLE',\n};\n\nfunction describe(error) {\n  if (!error) return { status: null, message: 'no error detail' };\n  if (typeof error === 'string') {\n    const status = (error.match(/\\b([45]\\d\\d)\\b/) || [])[1];\n    return { status: status ? Number(status) : null, message: error };\n  }\n  const status = Number(error.httpCode || error.status || (String(error.message || '').match(/\\b([45]\\d\\d)\\b/) || [])[1]) || null;\n  const message = [error.message, error.description].filter(Boolean).join(' | ');\n  return { status, message: message || JSON.stringify(error).slice(0, 300) };\n}\n\nfunction codeFor(step, status) {\n  const base = STEP_CODES[step] || 'STEP_FAILED';\n  // A 4xx from the model API is a request problem a replay will not fix.\n  if (base === 'LLM_UNAVAILABLE' && status && status >= 400 && status < 500 && status !== 408 && status !== 429) return 'LLM_REQUEST_REJECTED';\n  return base;\n}\n\nfunction run(items, ctx) {\n  const step = ctx.prevNode || 'unknown step';\n  const { status, message } = describe(items[0] && items[0].json && items[0].json.error);\n  const code = codeFor(step, status);\n  throw new Error(`[${code}] (node: ${step}) ${status ? `HTTP ${status} ` : ''}after retries: ${message}`.slice(0, 1000));\n}\n\nmodule.exports = { run, describe, codeFor, STEP_CODES };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/raise-step-error.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Requisition or resume fetch failed) \");\n  throw e;\n}"
+      },
+      "id": "9b77fab4-2a34-4c23-a965-4add709b51fd",
+      "name": "Requisition or resume fetch failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        1510
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/boolean-prefilter.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/boolean-prefilter.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Pre-filter\".\n// Deterministic gates before any model call, in this order:\n//   1. required documents present        -> otherwise Incomplete\n//   2. resume has readable text          -> otherwise Manual review\n//   3. the requisition's Boolean screen  -> otherwise Screened out\n// Each outcome records why, so a recruiter can see the failed clause.\nconst { parse, evaluate } = require('../lib/boolean-query');\nconst { assertValid } = require('../lib/contract');\nconst { prefilterV1 } = require('../lib/schemas');\n\nfunction profileFields(application) {\n  const c = application.candidate;\n  return {\n    license: [c.license_state, ...(c.license_multistate ? ['compact'] : [])],\n    state: c.home_state,\n    years: c.years_experience,\n    shift: c.shift_preference,\n    specialty: c.specialty,\n    doc: application.attachments.map((a) => a.kind),\n  };\n}\n\nfunction run(items, ctx) {\n  const base = ctx.node('Normalize requisition');\n  const textInfo = ctx.executed('Check resume text') ? ctx.node('Check resume text') : null;\n  const { application, requisition } = base;\n\n  const prefilter = { outcome: 'score', boolean_passed: null, failed_clauses: [], matched_terms: [], missing_documents: base.missing_documents };\n\n  if (base.missing_documents.length) {\n    prefilter.outcome = 'incomplete';\n  } else if (!textInfo || !textInfo.readable) {\n    prefilter.outcome = 'unreadable';\n  } else {\n    const ast = parse(requisition.boolean_screen);\n    const profileText = [application.candidate.specialty, textInfo.resume_text].join('\\n');\n    const result = evaluate(ast, { text: profileText, fields: profileFields(application) });\n    prefilter.boolean_passed = result.passed;\n    prefilter.failed_clauses = result.failed;\n    prefilter.matched_terms = result.matched;\n    prefilter.outcome = result.passed ? 'score' : 'screened_out';\n  }\n  assertValid(prefilterV1, prefilter, 'prefilter.v1');\n\n  return [{\n    json: {\n      application,\n      requisition,\n      prefilter,\n      resume_text: textInfo ? textInfo.resume_text : '',\n      resume_chars: textInfo ? textInfo.chars : 0,\n      content_hash: textInfo ? textInfo.content_hash : null,\n    },\n  }];\n}\n\nmodule.exports = { run, profileFields };\n}, {\"../lib/boolean-query\":\"src/lib/boolean-query.js\",\"../lib/contract\":\"src/lib/contract.js\",\"../lib/schemas\":\"src/lib/schemas.js\"}],\n\"src/lib/boolean-query.js\": [function (module, exports, require) {\n'use strict';\n// Recruiter-style Boolean screens, e.g.\n//   (\"registered nurse\" OR RN) AND (ICU OR \"critical care\") AND license:TX AND years>=2 AND NOT \"new grad\"\n// Operators are upper case, as in the job boards recruiters already use. Two\n// terms side by side mean AND. Text terms match whole words in the resume and\n// profile; a trailing * matches a prefix (nurs* matches nurse and nursing).\n// Field terms test structured profile fields instead of free text.\n\nclass QueryError extends Error {\n  constructor(message, position) {\n    super(`[BOOLEAN_SYNTAX] ${message} at position ${position}`);\n    this.name = 'QueryError';\n    this.code = 'BOOLEAN_SYNTAX';\n    this.position = position;\n  }\n}\n\nconst FIELDS = ['license', 'state', 'years', 'shift', 'specialty', 'doc'];\nconst NUMERIC_FIELDS = ['years'];\n\nfunction tokenize(query) {\n  const tokens = [];\n  let i = 0;\n  while (i < query.length) {\n    const ch = query[i];\n    if (/\\s/.test(ch)) { i += 1; continue; }\n    if (ch === '(' || ch === ')') { tokens.push({ type: ch, pos: i }); i += 1; continue; }\n    if (ch === '\"') {\n      const end = query.indexOf('\"', i + 1);\n      if (end === -1) throw new QueryError('unclosed quote', i);\n      tokens.push({ type: 'phrase', value: query.slice(i + 1, end), pos: i });\n      i = end + 1;\n      continue;\n    }\n    let j = i;\n    while (j < query.length && !/[\\s()\"]/.test(query[j])) j += 1;\n    const word = query.slice(i, j);\n    if (word === 'AND' || word === 'OR' || word === 'NOT') tokens.push({ type: word, pos: i });\n    else tokens.push({ type: 'word', value: word, pos: i });\n    i = j;\n  }\n  return tokens;\n}\n\nfunction parseTerm(token) {\n  const field = token.value.match(/^([a-z]+)(:|>=|<=|>|<|=)(.+)$/i);\n  if (field && FIELDS.includes(field[1].toLowerCase())) {\n    const name = field[1].toLowerCase();\n    const op = field[2];\n    const raw = field[3];\n    if (NUMERIC_FIELDS.includes(name)) {\n      const value = Number(raw);\n      if (!Number.isFinite(value)) throw new QueryError(`${name} needs a number`, token.pos);\n      return { type: 'field', field: name, op: op === ':' ? '=' : op, value };\n    }\n    if (op !== ':') throw new QueryError(`${name} only supports \":\"`, token.pos);\n    return { type: 'field', field: name, op: ':', value: raw.toLowerCase() };\n  }\n  return { type: 'text', value: token.value, wildcard: token.value.endsWith('*') };\n}\n\nfunction parse(query) {\n  const tokens = tokenize(query);\n  let k = 0;\n  const peek = () => tokens[k];\n  const next = () => tokens[k++];\n\n  function parseOr() {\n    const children = [parseAnd()];\n    while (peek() && peek().type === 'OR') { next(); children.push(parseAnd()); }\n    return children.length === 1 ? children[0] : { type: 'or', children };\n  }\n  function parseAnd() {\n    const children = [parseNot()];\n    for (;;) {\n      const t = peek();\n      if (!t || t.type === 'OR' || t.type === ')') break;\n      if (t.type === 'AND') next();\n      children.push(parseNot());\n    }\n    return children.length === 1 ? children[0] : { type: 'and', children };\n  }\n  function parseNot() {\n    if (peek() && peek().type === 'NOT') { next(); return { type: 'not', child: parseNot() }; }\n    return parsePrimary();\n  }\n  function parsePrimary() {\n    const t = next();\n    if (!t) throw new QueryError('unexpected end of query', query.length);\n    if (t.type === '(') {\n      const inner = parseOr();\n      const close = next();\n      if (!close || close.type !== ')') throw new QueryError('missing )', close ? close.pos : query.length);\n      return inner;\n    }\n    if (t.type === 'phrase') return { type: 'text', value: t.value, phrase: true, wildcard: false };\n    if (t.type === 'word') return parseTerm(t);\n    throw new QueryError(`unexpected ${t.type}`, t.pos);\n  }\n\n  if (!tokens.length) throw new QueryError('empty query', 0);\n  const ast = parseOr();\n  if (k < tokens.length) throw new QueryError(`unexpected ${tokens[k].type}`, tokens[k].pos);\n  return ast;\n}\n\nfunction normalizeText(text) {\n  return ` ${String(text).toLowerCase().replace(/[^a-z0-9+#*]+/g, ' ').trim()} `;\n}\n\nfunction render(node) {\n  switch (node.type) {\n    case 'text': return node.phrase ? `\"${node.value}\"` : node.value;\n    case 'field': return node.op === ':' ? `${node.field}:${node.value.length === 2 ? node.value.toUpperCase() : node.value}` : `${node.field}${node.op}${node.value}`;\n    case 'not': return `NOT ${render(node.child)}`;\n    case 'and': return node.children.map((c) => (c.type === 'or' ? `(${render(c)})` : render(c))).join(' AND ');\n    case 'or': return node.children.map(render).join(' OR ');\n    default: return '?';\n  }\n}\n\nfunction matchText(node, haystack) {\n  const needle = normalizeText(node.value.replace(/\\*$/, '')).trim();\n  if (!needle) return false;\n  if (node.wildcard) return new RegExp(`\\\\s${needle.replace(/[+#]/g, '\\\\$&')}[a-z0-9]*\\\\s`).test(haystack);\n  return haystack.includes(` ${needle} `);\n}\n\nfunction matchField(node, fields) {\n  const value = fields[node.field];\n  if (node.field === 'years') {\n    const n = Number(value);\n    switch (node.op) {\n      case '>=': return n >= node.value;\n      case '<=': return n <= node.value;\n      case '>': return n > node.value;\n      case '<': return n < node.value;\n      default: return n === node.value;\n    }\n  }\n  const values = (Array.isArray(value) ? value : [value]).map((v) => String(v).toLowerCase());\n  return values.includes(node.value);\n}\n\n// Returns { passed, matched, failed }. `failed` lists the top-level clauses\n// that made the screen fail, rendered back as text a recruiter can read.\nfunction evaluate(ast, { text, fields }) {\n  const haystack = normalizeText(text);\n  const matched = new Set();\n\n  function ev(node) {\n    switch (node.type) {\n      case 'text': { const ok = matchText(node, haystack); if (ok) matched.add(render(node)); return ok; }\n      case 'field': { const ok = matchField(node, fields); if (ok) matched.add(render(node)); return ok; }\n      case 'not': return !ev(node.child);\n      case 'and': { let ok = true; for (const c of node.children) ok = ev(c) && ok; return ok; }\n      case 'or': { let ok = false; for (const c of node.children) ok = ev(c) || ok; return ok; }\n      default: return false;\n    }\n  }\n\n  const passed = ev(ast);\n  const clauses = ast.type === 'and' ? ast.children : [ast];\n  const failed = passed ? [] : clauses.filter((c) => !ev(c)).map((c) => (c.type === 'or' ? `(${render(c)})` : render(c)));\n  return { passed, matched: [...matched], failed };\n}\n\nmodule.exports = { QueryError, tokenize, parse, evaluate, render, normalizeText };\n}, {}],\n\"src/lib/contract.js\": [function (module, exports, require) {\n'use strict';\n// A small JSON Schema subset validator. It runs inside n8n Code nodes, where\n// npm packages are not available, so it is dependency free. It supports the\n// keywords the contracts in schemas.js use and nothing else.\n\nclass ContractError extends Error {\n  constructor(code, contract, errors) {\n    const first = errors.slice(0, 3).map((e) => `${e.path || '/'} ${e.message}`).join('; ');\n    super(`[${code}] ${contract}: ${first}${errors.length > 3 ? ` (+${errors.length - 3} more)` : ''}`);\n    this.name = 'ContractError';\n    this.code = code;\n    this.contract = contract;\n    this.errors = errors;\n  }\n}\n\nfunction typeOf(value) {\n  if (value === null) return 'null';\n  if (Array.isArray(value)) return 'array';\n  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number';\n  return typeof value;\n}\n\nfunction typeMatches(expected, actual) {\n  if (expected === actual) return true;\n  return expected === 'number' && actual === 'integer';\n}\n\nfunction validate(schema, value, path = '', errors = []) {\n  const actual = typeOf(value);\n\n  if (schema.type) {\n    const types = Array.isArray(schema.type) ? schema.type : [schema.type];\n    if (!types.some((t) => typeMatches(t, actual))) {\n      errors.push({ path, message: `must be ${types.join(' or ')}, got ${actual}` });\n      return errors;\n    }\n  }\n  if ('const' in schema && value !== schema.const) {\n    errors.push({ path, message: `must equal ${JSON.stringify(schema.const)}` });\n  }\n  if (schema.enum && !schema.enum.includes(value)) {\n    errors.push({ path, message: `must be one of ${schema.enum.map((v) => JSON.stringify(v)).join(', ')}` });\n  }\n\n  if (actual === 'string') {\n    if (schema.minLength !== undefined && value.length < schema.minLength) {\n      errors.push({ path, message: `must be at least ${schema.minLength} characters` });\n    }\n    if (schema.maxLength !== undefined && value.length > schema.maxLength) {\n      errors.push({ path, message: `must be at most ${schema.maxLength} characters` });\n    }\n    if (schema.pattern && !new RegExp(schema.pattern).test(value)) {\n      errors.push({ path, message: `must match ${schema.pattern}` });\n    }\n  }\n\n  if (actual === 'integer' || actual === 'number') {\n    if (schema.minimum !== undefined && value < schema.minimum) {\n      errors.push({ path, message: `must be >= ${schema.minimum}` });\n    }\n    if (schema.maximum !== undefined && value > schema.maximum) {\n      errors.push({ path, message: `must be <= ${schema.maximum}` });\n    }\n  }\n\n  if (actual === 'array') {\n    if (schema.minItems !== undefined && value.length < schema.minItems) {\n      errors.push({ path, message: `must have at least ${schema.minItems} items` });\n    }\n    if (schema.maxItems !== undefined && value.length > schema.maxItems) {\n      errors.push({ path, message: `must have at most ${schema.maxItems} items` });\n    }\n    if (schema.items) value.forEach((item, i) => validate(schema.items, item, `${path}/${i}`, errors));\n  }\n\n  if (actual === 'object') {\n    const props = schema.properties || {};\n    for (const key of schema.required || []) {\n      if (!(key in value) || value[key] === undefined) errors.push({ path: `${path}/${key}`, message: 'is required' });\n    }\n    for (const [key, child] of Object.entries(value)) {\n      if (props[key]) validate(props[key], child, `${path}/${key}`, errors);\n      else if (schema.additionalProperties === false) errors.push({ path: `${path}/${key}`, message: 'is not allowed' });\n    }\n  }\n  return errors;\n}\n\nfunction assertValid(schema, value, contract, code = 'CONTRACT_VIOLATION') {\n  const errors = validate(schema, value);\n  if (errors.length) throw new ContractError(code, contract, errors);\n  return value;\n}\n\n// Structured outputs accept the structural part of JSON Schema but not range or\n// length keywords. The API gets the structure; assertValid enforces the rest.\nconst API_UNSUPPORTED = ['minimum', 'maximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', '$id'];\n\nfunction toApiSchema(schema) {\n  if (Array.isArray(schema)) return schema.map(toApiSchema);\n  if (!schema || typeof schema !== 'object') return schema;\n  const out = {};\n  for (const [key, value] of Object.entries(schema)) {\n    if (API_UNSUPPORTED.includes(key)) continue;\n    out[key] = key === 'properties'\n      ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, toApiSchema(v)]))\n      : toApiSchema(value);\n  }\n  return out;\n}\n\nmodule.exports = { ContractError, validate, assertValid, toApiSchema };\n}, {}],\n\"src/lib/schemas.js\": [function (module, exports, require) {\n'use strict';\n// Versioned contracts between workflow steps. Every Code node that produces one\n// of these shapes validates it before handing it on, so a portal layout change\n// or a malformed model reply stops the run with a reason code instead of\n// travelling downstream as empty fields.\n\nconst STATUSES = ['Shortlisted', 'Recruiter review', 'Low match', 'Screened out', 'Incomplete', 'Manual review'];\nconst BANDS = ['Shortlisted', 'Recruiter review', 'Low match'];\nconst ATTACHMENT_KINDS = ['resume', 'license', 'certification', 'other'];\n\nconst applicationV1 = {\n  $id: 'application.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition_id', 'received_at', 'portal_status', 'csrf_token', 'candidate', 'attachments'],\n  properties: {\n    schema_version: { const: 'application.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    received_at: { type: 'string', pattern: '^\\\\d{4}-\\\\d{2}-\\\\d{2}T' },\n    portal_status: { type: 'string', minLength: 1 },\n    csrf_token: { type: 'string', minLength: 16 },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'email', 'phone', 'home_state', 'license_state', 'license_multistate', 'specialty', 'years_experience', 'shift_preference'],\n      properties: {\n        name: { type: 'string', minLength: 2, maxLength: 120 },\n        email: { type: 'string', pattern: '^[^@\\\\s]+@[^@\\\\s]+$' },\n        phone: { type: 'string', minLength: 7 },\n        home_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_multistate: { type: 'boolean' },\n        specialty: { type: 'string', minLength: 2 },\n        years_experience: { type: 'number', minimum: 0, maximum: 60 },\n        shift_preference: { enum: ['days', 'nights', 'any'] },\n      },\n    },\n    attachments: {\n      type: 'array',\n      maxItems: 10,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['kind', 'url', 'filename'],\n        properties: {\n          kind: { enum: ATTACHMENT_KINDS },\n          url: { type: 'string', pattern: '^/attachments/\\\\d+$' },\n          filename: { type: 'string', minLength: 1 },\n        },\n      },\n    },\n  },\n};\n\nconst requisitionV1 = {\n  $id: 'requisition.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'requisition_id', 'title', 'facility', 'boolean_screen', 'required_documents', 'criteria', 'recruiter_email', 'account_manager_email'],\n  properties: {\n    schema_version: { const: 'requisition.v1' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    title: { type: 'string', minLength: 3 },\n    facility: { type: 'string', minLength: 3 },\n    boolean_screen: { type: 'string', minLength: 3 },\n    required_documents: { type: 'array', items: { enum: ATTACHMENT_KINDS } },\n    criteria: {\n      type: 'array',\n      minItems: 2,\n      maxItems: 8,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          text: { type: 'string', minLength: 10 },\n          weight: { type: 'integer', minimum: 1, maximum: 3 },\n          must_have: { type: 'boolean' },\n        },\n      },\n    },\n    recruiter_email: { type: 'string', pattern: '@' },\n    account_manager_email: { type: 'string', pattern: '@' },\n  },\n};\n\nconst prefilterV1 = {\n  $id: 'prefilter.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['outcome', 'boolean_passed', 'failed_clauses', 'matched_terms', 'missing_documents'],\n  properties: {\n    outcome: { enum: ['score', 'screened_out', 'incomplete', 'unreadable'] },\n    boolean_passed: { type: ['boolean', 'null'] },\n    failed_clauses: { type: 'array', items: { type: 'string' } },\n    matched_terms: { type: 'array', items: { type: 'string' } },\n    missing_documents: { type: 'array', items: { type: 'string' } },\n  },\n};\n\n// What the model must return. Sent to the API as the structured-output schema\n// (structure only, see toApiSchema) and enforced in full by the Code node.\nconst modelOutputV1 = {\n  $id: 'model_output.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['criteria', 'summary', 'concerns'],\n  properties: {\n    criteria: {\n      type: 'array',\n      minItems: 1,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'rating', 'evidence'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string', maxLength: 400 },\n        },\n      },\n    },\n    summary: { type: 'string', minLength: 20, maxLength: 900 },\n    concerns: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 300 } },\n  },\n};\n\nconst screeningV1 = {\n  $id: 'screening.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['score', 'band', 'criteria', 'ungrounded', 'must_have_gaps', 'summary', 'concerns', 'model', 'prompt_version'],\n  properties: {\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    band: { enum: BANDS },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have', 'rating', 'evidence', 'grounded'],\n        properties: {\n          id: { type: 'string' },\n          text: { type: 'string' },\n          weight: { type: 'integer' },\n          must_have: { type: 'boolean' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string' },\n          grounded: { type: 'boolean' },\n        },\n      },\n    },\n    ungrounded: { type: 'integer', minimum: 0 },\n    must_have_gaps: { type: 'array', items: { type: 'string' } },\n    summary: { type: 'string' },\n    concerns: { type: 'array', items: { type: 'string' } },\n    model: { type: 'string', minLength: 1 },\n    prompt_version: { type: 'string', minLength: 1 },\n  },\n};\n\nconst submittalV1 = {\n  $id: 'submittal.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition', 'candidate', 'score', 'criteria', 'summary', 'generated_at'],\n  properties: {\n    schema_version: { const: 'submittal.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['id', 'title', 'facility'],\n      properties: { id: { type: 'string' }, title: { type: 'string' }, facility: { type: 'string' } },\n    },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'specialty', 'years_experience', 'license', 'shift_preference'],\n      properties: {\n        name: { type: 'string' },\n        specialty: { type: 'string' },\n        years_experience: { type: 'number' },\n        license: { type: 'string' },\n        shift_preference: { type: 'string' },\n      },\n    },\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['text', 'rating_label', 'evidence'],\n        properties: { text: { type: 'string' }, rating_label: { type: 'string' }, evidence: { type: 'string' } },\n      },\n    },\n    summary: { type: 'string' },\n    generated_at: { type: 'string' },\n  },\n};\n\nmodule.exports = { STATUSES, BANDS, applicationV1, requisitionV1, prefilterV1, modelOutputV1, screeningV1, submittalV1 };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/boolean-prefilter.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Pre-filter) \");\n  throw e;\n}"
+      },
+      "id": "ce0f88c5-31fe-4747-a5ab-0a6a37311fdf",
+      "name": "Pre-filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9badca7e-3f8d-4144-a165-f9e7b49e98d1",
+              "leftValue": "={{ $json.prefilter.outcome }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "score"
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "b3480a4a-1608-4ab8-a548-ae8ff18d3f69",
+      "name": "Needs scoring?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1840,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/build-scoring-request.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/build-scoring-request.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Build scoring request\".\n// Builds the Messages API body. The output schema goes in output_config.format,\n// so the reply is guaranteed to parse; the range checks the API cannot express\n// are enforced afterwards in \"Validate and score\".\nconst { maskForModel } = require('../lib/pii');\nconst { toApiSchema } = require('../lib/contract');\nconst { modelOutputV1 } = require('../lib/schemas');\nconst { PROMPT_VERSION, SYSTEM_PROMPT, buildUserMessage } = require('../lib/prompt');\n\nfunction run(items, ctx) {\n  const p = items[0].json;\n  const settings = ctx.node('Load settings').settings;\n  const { text, masked } = maskForModel(p.resume_text, p.application.candidate.name);\n\n  const request = {\n    model: settings.model,\n    max_tokens: settings.max_tokens,\n    fallbacks: 'default',\n    output_config: {\n      effort: settings.effort,\n      format: { type: 'json_schema', schema: toApiSchema(modelOutputV1) },\n    },\n    system: SYSTEM_PROMPT,\n    messages: [{ role: 'user', content: buildUserMessage(p.requisition, text) }],\n  };\n\n  return [{ json: { request, model_text: text, masked, prompt_version: PROMPT_VERSION, criteria: p.requisition.criteria } }];\n}\n\nmodule.exports = { run };\n}, {\"../lib/pii\":\"src/lib/pii.js\",\"../lib/contract\":\"src/lib/contract.js\",\"../lib/schemas\":\"src/lib/schemas.js\",\"../lib/prompt\":\"src/lib/prompt.js\"}],\n\"src/lib/pii.js\": [function (module, exports, require) {\n'use strict';\n// Masks direct identifiers in resume text before it is sent to the model.\n// The model only needs skills and experience; names, contact details and\n// street addresses add bias risk and nothing else. Evidence quotes are later\n// checked against this masked text, which is exactly what the model saw.\n\nconst PATTERNS = [\n  ['email', /[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/gi, '[EMAIL]'],\n  ['url', /\\b(?:https?:\\/\\/|www\\.)\\S+/gi, '[URL]'],\n  ['phone', /(?:\\+?1[\\s.-]?)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}\\b/g, '[PHONE]'],\n  ['phone', /\\b\\d{3}[\\s.-]\\d{4}\\b/g, '[PHONE]'],\n  ['address', /\\b\\d{1,5}\\s+(?:[A-Z][a-z]+\\s){1,3}(?:Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Way|Court|Ct|Place|Pl)\\b\\.?[^\\n]*/g, '[ADDRESS]'],\n  ['birthdate', /\\b(?:DOB|Date of birth)\\s*:?[^\\n]*/gi, '[DOB]'],\n];\n\nfunction escapeRegex(s) {\n  return s.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');\n}\n\nfunction maskForModel(text, candidateName) {\n  let out = String(text);\n  const counts = {};\n  const bump = (kind, n) => { if (n) counts[kind] = (counts[kind] || 0) + n; };\n\n  for (const [kind, re, replacement] of PATTERNS) {\n    let n = 0;\n    out = out.replace(re, () => { n += 1; return replacement; });\n    bump(kind, n);\n  }\n\n  const parts = String(candidateName || '')\n    .split(/\\s+/)\n    .map((p) => p.replace(/[^\\p{L}'-]/gu, ''))\n    .filter((p) => p.length >= 2);\n  const names = [String(candidateName || '').trim(), ...parts].filter(Boolean);\n  for (const name of names) {\n    const re = new RegExp(`(?<![\\\\p{L}])${escapeRegex(name)}(?![\\\\p{L}])`, 'giu');\n    let n = 0;\n    out = out.replace(re, () => { n += 1; return '[CANDIDATE]'; });\n    bump('name', n);\n  }\n  out = out.replace(/\\[CANDIDATE\\](?:[\\s-]+\\[CANDIDATE\\])+/g, '[CANDIDATE]');\n  return { text: out, masked: counts };\n}\n\nmodule.exports = { maskForModel };\n}, {}],\n\"src/lib/contract.js\": [function (module, exports, require) {\n'use strict';\n// A small JSON Schema subset validator. It runs inside n8n Code nodes, where\n// npm packages are not available, so it is dependency free. It supports the\n// keywords the contracts in schemas.js use and nothing else.\n\nclass ContractError extends Error {\n  constructor(code, contract, errors) {\n    const first = errors.slice(0, 3).map((e) => `${e.path || '/'} ${e.message}`).join('; ');\n    super(`[${code}] ${contract}: ${first}${errors.length > 3 ? ` (+${errors.length - 3} more)` : ''}`);\n    this.name = 'ContractError';\n    this.code = code;\n    this.contract = contract;\n    this.errors = errors;\n  }\n}\n\nfunction typeOf(value) {\n  if (value === null) return 'null';\n  if (Array.isArray(value)) return 'array';\n  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number';\n  return typeof value;\n}\n\nfunction typeMatches(expected, actual) {\n  if (expected === actual) return true;\n  return expected === 'number' && actual === 'integer';\n}\n\nfunction validate(schema, value, path = '', errors = []) {\n  const actual = typeOf(value);\n\n  if (schema.type) {\n    const types = Array.isArray(schema.type) ? schema.type : [schema.type];\n    if (!types.some((t) => typeMatches(t, actual))) {\n      errors.push({ path, message: `must be ${types.join(' or ')}, got ${actual}` });\n      return errors;\n    }\n  }\n  if ('const' in schema && value !== schema.const) {\n    errors.push({ path, message: `must equal ${JSON.stringify(schema.const)}` });\n  }\n  if (schema.enum && !schema.enum.includes(value)) {\n    errors.push({ path, message: `must be one of ${schema.enum.map((v) => JSON.stringify(v)).join(', ')}` });\n  }\n\n  if (actual === 'string') {\n    if (schema.minLength !== undefined && value.length < schema.minLength) {\n      errors.push({ path, message: `must be at least ${schema.minLength} characters` });\n    }\n    if (schema.maxLength !== undefined && value.length > schema.maxLength) {\n      errors.push({ path, message: `must be at most ${schema.maxLength} characters` });\n    }\n    if (schema.pattern && !new RegExp(schema.pattern).test(value)) {\n      errors.push({ path, message: `must match ${schema.pattern}` });\n    }\n  }\n\n  if (actual === 'integer' || actual === 'number') {\n    if (schema.minimum !== undefined && value < schema.minimum) {\n      errors.push({ path, message: `must be >= ${schema.minimum}` });\n    }\n    if (schema.maximum !== undefined && value > schema.maximum) {\n      errors.push({ path, message: `must be <= ${schema.maximum}` });\n    }\n  }\n\n  if (actual === 'array') {\n    if (schema.minItems !== undefined && value.length < schema.minItems) {\n      errors.push({ path, message: `must have at least ${schema.minItems} items` });\n    }\n    if (schema.maxItems !== undefined && value.length > schema.maxItems) {\n      errors.push({ path, message: `must have at most ${schema.maxItems} items` });\n    }\n    if (schema.items) value.forEach((item, i) => validate(schema.items, item, `${path}/${i}`, errors));\n  }\n\n  if (actual === 'object') {\n    const props = schema.properties || {};\n    for (const key of schema.required || []) {\n      if (!(key in value) || value[key] === undefined) errors.push({ path: `${path}/${key}`, message: 'is required' });\n    }\n    for (const [key, child] of Object.entries(value)) {\n      if (props[key]) validate(props[key], child, `${path}/${key}`, errors);\n      else if (schema.additionalProperties === false) errors.push({ path: `${path}/${key}`, message: 'is not allowed' });\n    }\n  }\n  return errors;\n}\n\nfunction assertValid(schema, value, contract, code = 'CONTRACT_VIOLATION') {\n  const errors = validate(schema, value);\n  if (errors.length) throw new ContractError(code, contract, errors);\n  return value;\n}\n\n// Structured outputs accept the structural part of JSON Schema but not range or\n// length keywords. The API gets the structure; assertValid enforces the rest.\nconst API_UNSUPPORTED = ['minimum', 'maximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', '$id'];\n\nfunction toApiSchema(schema) {\n  if (Array.isArray(schema)) return schema.map(toApiSchema);\n  if (!schema || typeof schema !== 'object') return schema;\n  const out = {};\n  for (const [key, value] of Object.entries(schema)) {\n    if (API_UNSUPPORTED.includes(key)) continue;\n    out[key] = key === 'properties'\n      ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, toApiSchema(v)]))\n      : toApiSchema(value);\n  }\n  return out;\n}\n\nmodule.exports = { ContractError, validate, assertValid, toApiSchema };\n}, {}],\n\"src/lib/schemas.js\": [function (module, exports, require) {\n'use strict';\n// Versioned contracts between workflow steps. Every Code node that produces one\n// of these shapes validates it before handing it on, so a portal layout change\n// or a malformed model reply stops the run with a reason code instead of\n// travelling downstream as empty fields.\n\nconst STATUSES = ['Shortlisted', 'Recruiter review', 'Low match', 'Screened out', 'Incomplete', 'Manual review'];\nconst BANDS = ['Shortlisted', 'Recruiter review', 'Low match'];\nconst ATTACHMENT_KINDS = ['resume', 'license', 'certification', 'other'];\n\nconst applicationV1 = {\n  $id: 'application.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition_id', 'received_at', 'portal_status', 'csrf_token', 'candidate', 'attachments'],\n  properties: {\n    schema_version: { const: 'application.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    received_at: { type: 'string', pattern: '^\\\\d{4}-\\\\d{2}-\\\\d{2}T' },\n    portal_status: { type: 'string', minLength: 1 },\n    csrf_token: { type: 'string', minLength: 16 },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'email', 'phone', 'home_state', 'license_state', 'license_multistate', 'specialty', 'years_experience', 'shift_preference'],\n      properties: {\n        name: { type: 'string', minLength: 2, maxLength: 120 },\n        email: { type: 'string', pattern: '^[^@\\\\s]+@[^@\\\\s]+$' },\n        phone: { type: 'string', minLength: 7 },\n        home_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_multistate: { type: 'boolean' },\n        specialty: { type: 'string', minLength: 2 },\n        years_experience: { type: 'number', minimum: 0, maximum: 60 },\n        shift_preference: { enum: ['days', 'nights', 'any'] },\n      },\n    },\n    attachments: {\n      type: 'array',\n      maxItems: 10,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['kind', 'url', 'filename'],\n        properties: {\n          kind: { enum: ATTACHMENT_KINDS },\n          url: { type: 'string', pattern: '^/attachments/\\\\d+$' },\n          filename: { type: 'string', minLength: 1 },\n        },\n      },\n    },\n  },\n};\n\nconst requisitionV1 = {\n  $id: 'requisition.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'requisition_id', 'title', 'facility', 'boolean_screen', 'required_documents', 'criteria', 'recruiter_email', 'account_manager_email'],\n  properties: {\n    schema_version: { const: 'requisition.v1' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    title: { type: 'string', minLength: 3 },\n    facility: { type: 'string', minLength: 3 },\n    boolean_screen: { type: 'string', minLength: 3 },\n    required_documents: { type: 'array', items: { enum: ATTACHMENT_KINDS } },\n    criteria: {\n      type: 'array',\n      minItems: 2,\n      maxItems: 8,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          text: { type: 'string', minLength: 10 },\n          weight: { type: 'integer', minimum: 1, maximum: 3 },\n          must_have: { type: 'boolean' },\n        },\n      },\n    },\n    recruiter_email: { type: 'string', pattern: '@' },\n    account_manager_email: { type: 'string', pattern: '@' },\n  },\n};\n\nconst prefilterV1 = {\n  $id: 'prefilter.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['outcome', 'boolean_passed', 'failed_clauses', 'matched_terms', 'missing_documents'],\n  properties: {\n    outcome: { enum: ['score', 'screened_out', 'incomplete', 'unreadable'] },\n    boolean_passed: { type: ['boolean', 'null'] },\n    failed_clauses: { type: 'array', items: { type: 'string' } },\n    matched_terms: { type: 'array', items: { type: 'string' } },\n    missing_documents: { type: 'array', items: { type: 'string' } },\n  },\n};\n\n// What the model must return. Sent to the API as the structured-output schema\n// (structure only, see toApiSchema) and enforced in full by the Code node.\nconst modelOutputV1 = {\n  $id: 'model_output.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['criteria', 'summary', 'concerns'],\n  properties: {\n    criteria: {\n      type: 'array',\n      minItems: 1,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'rating', 'evidence'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string', maxLength: 400 },\n        },\n      },\n    },\n    summary: { type: 'string', minLength: 20, maxLength: 900 },\n    concerns: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 300 } },\n  },\n};\n\nconst screeningV1 = {\n  $id: 'screening.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['score', 'band', 'criteria', 'ungrounded', 'must_have_gaps', 'summary', 'concerns', 'model', 'prompt_version'],\n  properties: {\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    band: { enum: BANDS },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have', 'rating', 'evidence', 'grounded'],\n        properties: {\n          id: { type: 'string' },\n          text: { type: 'string' },\n          weight: { type: 'integer' },\n          must_have: { type: 'boolean' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string' },\n          grounded: { type: 'boolean' },\n        },\n      },\n    },\n    ungrounded: { type: 'integer', minimum: 0 },\n    must_have_gaps: { type: 'array', items: { type: 'string' } },\n    summary: { type: 'string' },\n    concerns: { type: 'array', items: { type: 'string' } },\n    model: { type: 'string', minLength: 1 },\n    prompt_version: { type: 'string', minLength: 1 },\n  },\n};\n\nconst submittalV1 = {\n  $id: 'submittal.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition', 'candidate', 'score', 'criteria', 'summary', 'generated_at'],\n  properties: {\n    schema_version: { const: 'submittal.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['id', 'title', 'facility'],\n      properties: { id: { type: 'string' }, title: { type: 'string' }, facility: { type: 'string' } },\n    },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'specialty', 'years_experience', 'license', 'shift_preference'],\n      properties: {\n        name: { type: 'string' },\n        specialty: { type: 'string' },\n        years_experience: { type: 'number' },\n        license: { type: 'string' },\n        shift_preference: { type: 'string' },\n      },\n    },\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['text', 'rating_label', 'evidence'],\n        properties: { text: { type: 'string' }, rating_label: { type: 'string' }, evidence: { type: 'string' } },\n      },\n    },\n    summary: { type: 'string' },\n    generated_at: { type: 'string' },\n  },\n};\n\nmodule.exports = { STATUSES, BANDS, applicationV1, requisitionV1, prefilterV1, modelOutputV1, screeningV1, submittalV1 };\n}, {}],\n\"src/lib/prompt.js\": [function (module, exports, require) {\n'use strict';\n// The screening prompt. Its version is stored with every run, so a score can\n// always be traced to the exact instructions that produced it.\n\nconst PROMPT_VERSION = 'screen-v3';\n\nconst SYSTEM_PROMPT = [\n  'You screen job applications for a healthcare staffing agency.',\n  'You receive one requisition with numbered criteria and one candidate resume with personal details removed.',\n  'For each criterion, rate the evidence in the resume:',\n  '0 = no evidence, 1 = weak or indirect evidence, 2 = partial evidence, 3 = clear and direct evidence.',\n  'For every rating of 1 or more, copy the single sentence from the resume that supports it, word for word, into \"evidence\".',\n  'Do not paraphrase, shorten or combine sentences. Use an empty string when the rating is 0.',\n  'Rate only what the resume states. Do not infer experience that is not written down.',\n  'Do not consider or mention age, gender, ethnicity, nationality, religion, disability, family status or any other protected characteristic.',\n  'Write a neutral two or three sentence summary of relevant experience, and list up to three concerns a recruiter should check.',\n  'Return one entry per criterion id, using the ids exactly as given.',\n].join('\\n');\n\nfunction buildUserMessage(requisition, resumeText) {\n  const criteria = requisition.criteria\n    .map((c) => `${c.id}${c.must_have ? ' (must have)' : ''}: ${c.text}`)\n    .join('\\n');\n  return [\n    `<requisition id=\"${requisition.requisition_id}\">`,\n    `Title: ${requisition.title}`,\n    'Criteria:',\n    criteria,\n    '</requisition>',\n    '<resume>',\n    resumeText,\n    '</resume>',\n  ].join('\\n');\n}\n\nmodule.exports = { PROMPT_VERSION, SYSTEM_PROMPT, buildUserMessage };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/build-scoring-request.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Build scoring request) \");\n  throw e;\n}"
+      },
+      "id": "406bc00a-d5aa-4fd4-a4da-f90006e7b46f",
+      "name": "Build scoring request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2040,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Load settings').first().json.settings.llm_base_url }}/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "anthropic-beta",
+              "value": "server-side-fallback-2026-07-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "d4e1704b-ff4d-49c5-a99b-9b51f2efd19d",
+      "name": "Claude: rate criteria",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        1120
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "credAnthropic001",
+          "name": "Anthropic"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/raise-step-error.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/raise-step-error.js\": [function (module, exports, require) {\n'use strict';\n// Code nodes \"Login or page fetch failed\", \"Requisition or resume fetch failed\",\n// \"Model call failed\" and \"Render failed\".\n// Every HTTP node in the screening workflow retries on its own first. When it\n// still fails, its error output lands here. n8n would otherwise surface the\n// failure to the caller as a generic \"The service failed to process your\n// request\", losing which step failed and the status code. This re-throws it\n// tagged, so the dead letter says exactly what broke and whether a replay can\n// fix it.\n\nconst STEP_CODES = {\n  'Fetch application page': 'PORTAL_UNAVAILABLE',\n  'Refetch application page': 'PORTAL_UNAVAILABLE',\n  'Fetch requisition page': 'PORTAL_UNAVAILABLE',\n  'Download resume': 'PORTAL_UNAVAILABLE',\n  'Portal login': 'PORTAL_UNAVAILABLE',\n  'Log in again': 'PORTAL_UNAVAILABLE',\n  'Extract resume text': 'DOCSVC_UNAVAILABLE',\n  'Render Word submittal': 'DOCSVC_UNAVAILABLE',\n  'Claude: rate criteria': 'LLM_UNAVAILABLE',\n};\n\nfunction describe(error) {\n  if (!error) return { status: null, message: 'no error detail' };\n  if (typeof error === 'string') {\n    const status = (error.match(/\\b([45]\\d\\d)\\b/) || [])[1];\n    return { status: status ? Number(status) : null, message: error };\n  }\n  const status = Number(error.httpCode || error.status || (String(error.message || '').match(/\\b([45]\\d\\d)\\b/) || [])[1]) || null;\n  const message = [error.message, error.description].filter(Boolean).join(' | ');\n  return { status, message: message || JSON.stringify(error).slice(0, 300) };\n}\n\nfunction codeFor(step, status) {\n  const base = STEP_CODES[step] || 'STEP_FAILED';\n  // A 4xx from the model API is a request problem a replay will not fix.\n  if (base === 'LLM_UNAVAILABLE' && status && status >= 400 && status < 500 && status !== 408 && status !== 429) return 'LLM_REQUEST_REJECTED';\n  return base;\n}\n\nfunction run(items, ctx) {\n  const step = ctx.prevNode || 'unknown step';\n  const { status, message } = describe(items[0] && items[0].json && items[0].json.error);\n  const code = codeFor(step, status);\n  throw new Error(`[${code}] (node: ${step}) ${status ? `HTTP ${status} ` : ''}after retries: ${message}`.slice(0, 1000));\n}\n\nmodule.exports = { run, describe, codeFor, STEP_CODES };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/raise-step-error.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Model call failed) \");\n  throw e;\n}"
+      },
+      "id": "53d242ee-4b6a-404b-a594-34abc46aac8b",
+      "name": "Model call failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        1510
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/validate-and-score.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/validate-and-score.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Validate and score\".\n// Checks the model reply against model_output.v1, then grounds every quote:\n// a rating counts only if its evidence appears verbatim in the masked resume\n// the model was shown. The score and band are computed here, not by the model.\nconst { assertValid } = require('../lib/contract');\nconst { modelOutputV1, screeningV1 } = require('../lib/schemas');\nconst { isGrounded, computeScore, bandFor } = require('../lib/scoring');\n\nfunction fail(message) {\n  throw new Error(`[MODEL_CONTRACT_VIOLATION] ${message}`);\n}\n\nfunction run(items, ctx) {\n  const res = items[0].json;\n  const req = ctx.node('Build scoring request');\n  const settings = ctx.node('Load settings').settings;\n\n  if (res.stop_reason === 'refusal') {\n    return [{ json: { refusal: true, screening: null, usage: res.usage || null } }];\n  }\n  if (res.stop_reason === 'max_tokens') {\n    throw new Error('[MODEL_TRUNCATED] the reply hit max_tokens before the JSON was complete');\n  }\n\n  const text = (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');\n  let parsed;\n  try {\n    parsed = JSON.parse(text);\n  } catch (e) {\n    fail(`reply is not JSON (${e.message})`);\n  }\n  assertValid(modelOutputV1, parsed, 'model_output.v1', 'MODEL_CONTRACT_VIOLATION');\n\n  const byId = new Map();\n  for (const r of parsed.criteria) {\n    if (byId.has(r.id)) fail(`criterion ${r.id} rated twice`);\n    byId.set(r.id, r);\n  }\n  const expected = req.criteria.map((c) => c.id);\n  const missing = expected.filter((id) => !byId.has(id));\n  const extra = [...byId.keys()].filter((id) => !expected.includes(id));\n  if (missing.length || extra.length) fail(`criteria mismatch, missing [${missing}] unexpected [${extra}]`);\n\n  const criteria = req.criteria.map((c) => {\n    const r = byId.get(c.id);\n    const grounded = r.rating === 0 || isGrounded(r.evidence, req.model_text);\n    return { id: c.id, text: c.text, weight: c.weight, must_have: c.must_have, rating: grounded ? r.rating : 0, evidence: r.evidence, grounded };\n  });\n\n  const score = computeScore(criteria);\n  const mustHaveGaps = criteria.filter((c) => c.must_have && c.rating === 0).map((c) => c.id);\n  const screening = {\n    score,\n    band: bandFor(score, mustHaveGaps, settings.thresholds),\n    criteria,\n    ungrounded: criteria.filter((c) => !c.grounded).length,\n    must_have_gaps: mustHaveGaps,\n    summary: parsed.summary,\n    concerns: parsed.concerns,\n    model: res.model || settings.model,\n    prompt_version: req.prompt_version,\n  };\n  assertValid(screeningV1, screening, 'screening.v1');\n  return [{ json: { refusal: false, screening, usage: res.usage || null } }];\n}\n\nmodule.exports = { run };\n}, {\"../lib/contract\":\"src/lib/contract.js\",\"../lib/schemas\":\"src/lib/schemas.js\",\"../lib/scoring\":\"src/lib/scoring.js\"}],\n\"src/lib/contract.js\": [function (module, exports, require) {\n'use strict';\n// A small JSON Schema subset validator. It runs inside n8n Code nodes, where\n// npm packages are not available, so it is dependency free. It supports the\n// keywords the contracts in schemas.js use and nothing else.\n\nclass ContractError extends Error {\n  constructor(code, contract, errors) {\n    const first = errors.slice(0, 3).map((e) => `${e.path || '/'} ${e.message}`).join('; ');\n    super(`[${code}] ${contract}: ${first}${errors.length > 3 ? ` (+${errors.length - 3} more)` : ''}`);\n    this.name = 'ContractError';\n    this.code = code;\n    this.contract = contract;\n    this.errors = errors;\n  }\n}\n\nfunction typeOf(value) {\n  if (value === null) return 'null';\n  if (Array.isArray(value)) return 'array';\n  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number';\n  return typeof value;\n}\n\nfunction typeMatches(expected, actual) {\n  if (expected === actual) return true;\n  return expected === 'number' && actual === 'integer';\n}\n\nfunction validate(schema, value, path = '', errors = []) {\n  const actual = typeOf(value);\n\n  if (schema.type) {\n    const types = Array.isArray(schema.type) ? schema.type : [schema.type];\n    if (!types.some((t) => typeMatches(t, actual))) {\n      errors.push({ path, message: `must be ${types.join(' or ')}, got ${actual}` });\n      return errors;\n    }\n  }\n  if ('const' in schema && value !== schema.const) {\n    errors.push({ path, message: `must equal ${JSON.stringify(schema.const)}` });\n  }\n  if (schema.enum && !schema.enum.includes(value)) {\n    errors.push({ path, message: `must be one of ${schema.enum.map((v) => JSON.stringify(v)).join(', ')}` });\n  }\n\n  if (actual === 'string') {\n    if (schema.minLength !== undefined && value.length < schema.minLength) {\n      errors.push({ path, message: `must be at least ${schema.minLength} characters` });\n    }\n    if (schema.maxLength !== undefined && value.length > schema.maxLength) {\n      errors.push({ path, message: `must be at most ${schema.maxLength} characters` });\n    }\n    if (schema.pattern && !new RegExp(schema.pattern).test(value)) {\n      errors.push({ path, message: `must match ${schema.pattern}` });\n    }\n  }\n\n  if (actual === 'integer' || actual === 'number') {\n    if (schema.minimum !== undefined && value < schema.minimum) {\n      errors.push({ path, message: `must be >= ${schema.minimum}` });\n    }\n    if (schema.maximum !== undefined && value > schema.maximum) {\n      errors.push({ path, message: `must be <= ${schema.maximum}` });\n    }\n  }\n\n  if (actual === 'array') {\n    if (schema.minItems !== undefined && value.length < schema.minItems) {\n      errors.push({ path, message: `must have at least ${schema.minItems} items` });\n    }\n    if (schema.maxItems !== undefined && value.length > schema.maxItems) {\n      errors.push({ path, message: `must have at most ${schema.maxItems} items` });\n    }\n    if (schema.items) value.forEach((item, i) => validate(schema.items, item, `${path}/${i}`, errors));\n  }\n\n  if (actual === 'object') {\n    const props = schema.properties || {};\n    for (const key of schema.required || []) {\n      if (!(key in value) || value[key] === undefined) errors.push({ path: `${path}/${key}`, message: 'is required' });\n    }\n    for (const [key, child] of Object.entries(value)) {\n      if (props[key]) validate(props[key], child, `${path}/${key}`, errors);\n      else if (schema.additionalProperties === false) errors.push({ path: `${path}/${key}`, message: 'is not allowed' });\n    }\n  }\n  return errors;\n}\n\nfunction assertValid(schema, value, contract, code = 'CONTRACT_VIOLATION') {\n  const errors = validate(schema, value);\n  if (errors.length) throw new ContractError(code, contract, errors);\n  return value;\n}\n\n// Structured outputs accept the structural part of JSON Schema but not range or\n// length keywords. The API gets the structure; assertValid enforces the rest.\nconst API_UNSUPPORTED = ['minimum', 'maximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', '$id'];\n\nfunction toApiSchema(schema) {\n  if (Array.isArray(schema)) return schema.map(toApiSchema);\n  if (!schema || typeof schema !== 'object') return schema;\n  const out = {};\n  for (const [key, value] of Object.entries(schema)) {\n    if (API_UNSUPPORTED.includes(key)) continue;\n    out[key] = key === 'properties'\n      ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, toApiSchema(v)]))\n      : toApiSchema(value);\n  }\n  return out;\n}\n\nmodule.exports = { ContractError, validate, assertValid, toApiSchema };\n}, {}],\n\"src/lib/schemas.js\": [function (module, exports, require) {\n'use strict';\n// Versioned contracts between workflow steps. Every Code node that produces one\n// of these shapes validates it before handing it on, so a portal layout change\n// or a malformed model reply stops the run with a reason code instead of\n// travelling downstream as empty fields.\n\nconst STATUSES = ['Shortlisted', 'Recruiter review', 'Low match', 'Screened out', 'Incomplete', 'Manual review'];\nconst BANDS = ['Shortlisted', 'Recruiter review', 'Low match'];\nconst ATTACHMENT_KINDS = ['resume', 'license', 'certification', 'other'];\n\nconst applicationV1 = {\n  $id: 'application.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition_id', 'received_at', 'portal_status', 'csrf_token', 'candidate', 'attachments'],\n  properties: {\n    schema_version: { const: 'application.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    received_at: { type: 'string', pattern: '^\\\\d{4}-\\\\d{2}-\\\\d{2}T' },\n    portal_status: { type: 'string', minLength: 1 },\n    csrf_token: { type: 'string', minLength: 16 },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'email', 'phone', 'home_state', 'license_state', 'license_multistate', 'specialty', 'years_experience', 'shift_preference'],\n      properties: {\n        name: { type: 'string', minLength: 2, maxLength: 120 },\n        email: { type: 'string', pattern: '^[^@\\\\s]+@[^@\\\\s]+$' },\n        phone: { type: 'string', minLength: 7 },\n        home_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_multistate: { type: 'boolean' },\n        specialty: { type: 'string', minLength: 2 },\n        years_experience: { type: 'number', minimum: 0, maximum: 60 },\n        shift_preference: { enum: ['days', 'nights', 'any'] },\n      },\n    },\n    attachments: {\n      type: 'array',\n      maxItems: 10,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['kind', 'url', 'filename'],\n        properties: {\n          kind: { enum: ATTACHMENT_KINDS },\n          url: { type: 'string', pattern: '^/attachments/\\\\d+$' },\n          filename: { type: 'string', minLength: 1 },\n        },\n      },\n    },\n  },\n};\n\nconst requisitionV1 = {\n  $id: 'requisition.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'requisition_id', 'title', 'facility', 'boolean_screen', 'required_documents', 'criteria', 'recruiter_email', 'account_manager_email'],\n  properties: {\n    schema_version: { const: 'requisition.v1' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    title: { type: 'string', minLength: 3 },\n    facility: { type: 'string', minLength: 3 },\n    boolean_screen: { type: 'string', minLength: 3 },\n    required_documents: { type: 'array', items: { enum: ATTACHMENT_KINDS } },\n    criteria: {\n      type: 'array',\n      minItems: 2,\n      maxItems: 8,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          text: { type: 'string', minLength: 10 },\n          weight: { type: 'integer', minimum: 1, maximum: 3 },\n          must_have: { type: 'boolean' },\n        },\n      },\n    },\n    recruiter_email: { type: 'string', pattern: '@' },\n    account_manager_email: { type: 'string', pattern: '@' },\n  },\n};\n\nconst prefilterV1 = {\n  $id: 'prefilter.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['outcome', 'boolean_passed', 'failed_clauses', 'matched_terms', 'missing_documents'],\n  properties: {\n    outcome: { enum: ['score', 'screened_out', 'incomplete', 'unreadable'] },\n    boolean_passed: { type: ['boolean', 'null'] },\n    failed_clauses: { type: 'array', items: { type: 'string' } },\n    matched_terms: { type: 'array', items: { type: 'string' } },\n    missing_documents: { type: 'array', items: { type: 'string' } },\n  },\n};\n\n// What the model must return. Sent to the API as the structured-output schema\n// (structure only, see toApiSchema) and enforced in full by the Code node.\nconst modelOutputV1 = {\n  $id: 'model_output.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['criteria', 'summary', 'concerns'],\n  properties: {\n    criteria: {\n      type: 'array',\n      minItems: 1,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'rating', 'evidence'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string', maxLength: 400 },\n        },\n      },\n    },\n    summary: { type: 'string', minLength: 20, maxLength: 900 },\n    concerns: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 300 } },\n  },\n};\n\nconst screeningV1 = {\n  $id: 'screening.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['score', 'band', 'criteria', 'ungrounded', 'must_have_gaps', 'summary', 'concerns', 'model', 'prompt_version'],\n  properties: {\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    band: { enum: BANDS },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have', 'rating', 'evidence', 'grounded'],\n        properties: {\n          id: { type: 'string' },\n          text: { type: 'string' },\n          weight: { type: 'integer' },\n          must_have: { type: 'boolean' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string' },\n          grounded: { type: 'boolean' },\n        },\n      },\n    },\n    ungrounded: { type: 'integer', minimum: 0 },\n    must_have_gaps: { type: 'array', items: { type: 'string' } },\n    summary: { type: 'string' },\n    concerns: { type: 'array', items: { type: 'string' } },\n    model: { type: 'string', minLength: 1 },\n    prompt_version: { type: 'string', minLength: 1 },\n  },\n};\n\nconst submittalV1 = {\n  $id: 'submittal.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition', 'candidate', 'score', 'criteria', 'summary', 'generated_at'],\n  properties: {\n    schema_version: { const: 'submittal.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['id', 'title', 'facility'],\n      properties: { id: { type: 'string' }, title: { type: 'string' }, facility: { type: 'string' } },\n    },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'specialty', 'years_experience', 'license', 'shift_preference'],\n      properties: {\n        name: { type: 'string' },\n        specialty: { type: 'string' },\n        years_experience: { type: 'number' },\n        license: { type: 'string' },\n        shift_preference: { type: 'string' },\n      },\n    },\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['text', 'rating_label', 'evidence'],\n        properties: { text: { type: 'string' }, rating_label: { type: 'string' }, evidence: { type: 'string' } },\n      },\n    },\n    summary: { type: 'string' },\n    generated_at: { type: 'string' },\n  },\n};\n\nmodule.exports = { STATUSES, BANDS, applicationV1, requisitionV1, prefilterV1, modelOutputV1, screeningV1, submittalV1 };\n}, {}],\n\"src/lib/scoring.js\": [function (module, exports, require) {\n'use strict';\n// The model rates evidence per criterion; this module does the arithmetic.\n// Keeping the score out of the model makes it reproducible from the stored\n// ratings and lets the thresholds change without touching the prompt.\n\nconst RATING_LABELS = ['No evidence', 'Weak', 'Partial', 'Strong'];\n\nfunction normalizeForMatch(s) {\n  return String(s)\n    .toLowerCase()\n    .replace(/[‘’]/g, \"'\")\n    .replace(/[“”]/g, '\"')\n    .replace(/[–—]/g, '-')\n    .replace(/\\s+/g, ' ')\n    .replace(/^[\\s\"'.,;:-]+|[\\s\"'.,;:-]+$/g, '')\n    .trim();\n}\n\n// A quote counts as grounded only if it appears verbatim (after whitespace,\n// case and quote-mark normalization) in the text the model was given.\nfunction isGrounded(evidence, sourceText) {\n  const needle = normalizeForMatch(evidence);\n  if (needle.length < 12) return false;\n  return normalizeForMatch(sourceText).includes(needle);\n}\n\nfunction computeScore(criteria) {\n  const max = criteria.reduce((sum, c) => sum + c.weight * 3, 0);\n  const got = criteria.reduce((sum, c) => sum + c.weight * c.rating, 0);\n  return max === 0 ? 0 : Math.round((100 * got) / max);\n}\n\nfunction bandFor(score, mustHaveGaps, thresholds) {\n  if (score >= thresholds.shortlist && mustHaveGaps.length === 0) return 'Shortlisted';\n  if (score >= thresholds.review) return 'Recruiter review';\n  return 'Low match';\n}\n\nmodule.exports = { RATING_LABELS, normalizeForMatch, isGrounded, computeScore, bandFor };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/validate-and-score.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Validate and score) \");\n  throw e;\n}"
+      },
+      "id": "69df1481-3268-4c11-a7c4-5c4486214a6c",
+      "name": "Validate and score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2440,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/decide-status.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/decide-status.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Decide status\".\n// One place maps every outcome to the portal status and the note recruiters\n// read on the application. The workflow never rejects anyone outright: the\n// lowest model band is \"Low match\", which still sits in a recruiter's queue.\n\nfunction run(items, ctx) {\n  const pre = ctx.node('Pre-filter');\n  const scored = ctx.executed('Validate and score') ? ctx.node('Validate and score') : null;\n  const { application, requisition, prefilter } = pre;\n\n  let status;\n  let reason = null;\n  let note;\n\n  switch (prefilter.outcome) {\n    case 'incomplete':\n      status = 'Incomplete';\n      reason = 'MISSING_DOCUMENTS';\n      note = `Missing required documents: ${prefilter.missing_documents.join(', ')}. Not screened yet.`;\n      break;\n    case 'unreadable':\n      status = 'Manual review';\n      reason = 'UNREADABLE_RESUME';\n      note = 'The resume has no readable text (likely a scanned image), so it was not scored.';\n      break;\n    case 'screened_out':\n      status = 'Screened out';\n      reason = 'BOOLEAN_SCREEN';\n      note = `Pre-filter for ${requisition.requisition_id} not met: ${prefilter.failed_clauses.join('; ')}.`;\n      break;\n    default:\n      if (!scored || scored.refusal) {\n        status = 'Manual review';\n        reason = 'MODEL_DECLINED';\n        note = 'The model declined to rate this resume, so a recruiter should screen it.';\n      } else {\n        const s = scored.screening;\n        status = s.band;\n        const gaps = s.must_have_gaps.length ? ` Must-have without evidence: ${s.must_have_gaps.join(', ')}.` : '';\n        const flags = s.ungrounded ? ` ${s.ungrounded} quote(s) not found in the resume, rated 0.` : '';\n        note = `Score ${s.score}/100 (${s.prompt_version}).${gaps}${flags}`;\n      }\n  }\n\n  return [{\n    json: {\n      application_id: application.application_id,\n      requisition_id: requisition.requisition_id,\n      status,\n      reason,\n      note: `[screening] ${note}`,\n      portal_status: application.portal_status,\n      csrf_token: application.csrf_token,\n      cookie: ctx.node('Normalize application').cookie,\n      needs_submittal: status === 'Shortlisted',\n    },\n  }];\n}\n\nmodule.exports = { run };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/decide-status.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Decide status) \");\n  throw e;\n}"
+      },
+      "id": "be97ade1-0ebf-4340-a833-2dcfb4532692",
+      "name": "Decide status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "322a1d66-e97c-4b80-ac38-72c9767ed032",
+              "leftValue": "={{ $json.portal_status }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "New"
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "c6c268f4-5183-4966-a3be-8f38697a3650",
+      "name": "Status still New?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        2350
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Load settings').first().json.settings.portal_base_url }}/applications/{{ $json.application_id }}/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cookie",
+              "value": "={{ $json.cookie }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "_csrf",
+              "value": "={{ $json.csrf_token }}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $json.status }}"
+            },
+            {
+              "name": "note",
+              "value": "={{ $json.note }}"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "0a978994-a763-4703-a8ae-b4ce0a705db2",
+      "name": "Write status to portal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        2170
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/confirm-status-write.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/confirm-status-write.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Confirm status write\".\n// The portal's status form answers a good post with a 303 back to the\n// application. Anything else (an expired CSRF token, a validation error page)\n// means the status did not change, and the run must not report that it did.\n\nfunction run(items, ctx) {\n  const res = items[0].json;\n  const decision = ctx.node('Decide status');\n  if (res.statusCode !== 303) {\n    const body = String(res.body || '').replace(/\\s+/g, ' ').slice(0, 200);\n    throw new Error(`[STATUS_WRITE_REJECTED] portal answered ${res.statusCode} when setting \"${decision.status}\": ${body}`);\n  }\n  return [{ json: { status_written: decision.status, application_id: decision.application_id } }];\n}\n\nmodule.exports = { run };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/confirm-status-write.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Confirm status write) \");\n  throw e;\n}"
+      },
+      "id": "0a9d5e15-ff10-4561-a300-6072b84df7fb",
+      "name": "Confirm status write",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        2170
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0533792c-24c3-47cd-a925-90ebf137ebed",
+              "leftValue": "={{ $('Decide status').first().json.needs_submittal && $('Confirm status write').isExecuted }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "076f5d83-8efe-48fb-a111-53953449dd34",
+      "name": "Shortlisted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        840,
+        2350
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into submittals (application_id, run_id) values ($1, $2::bigint)\non conflict (application_id) do nothing\nreturning application_id, run_id;",
+        "options": {
+          "queryReplacement": "={{ [ $('Decide status').first().json.application_id, $('Claim run').first().json.run_id ] }}"
+        }
+      },
+      "id": "86a69aae-7200-4270-a51d-7ce98233e24b",
+      "name": "Reserve submittal",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1040,
+        2170
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "credPgLedger0001",
+          "name": "Screening ledger (Postgres)"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d2d96db5-a0cb-4168-ae51-d6ce04beaa30",
+              "leftValue": "={{ $json.application_id || '' }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "8cf28d8e-0303-4b7c-a18f-87d5939253be",
+      "name": "First submittal?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1240,
+        2170
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/build-submittal.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/build-submittal.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Build submittal\".\n// The Word submittal goes to the requisition's recruiter, with the account\n// manager copied. The payload is checked against submittal.v1 before the\n// render service sees it, so a template never receives a missing field.\nconst { assertValid } = require('../lib/contract');\nconst { submittalV1 } = require('../lib/schemas');\nconst { RATING_LABELS } = require('../lib/scoring');\n\nfunction escapeHtml(s) {\n  return String(s).replace(/[&<>\"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[ch]));\n}\n\nfunction run(items, ctx) {\n  const { application, requisition } = ctx.node('Pre-filter');\n  const { screening } = ctx.node('Validate and score');\n  const settings = ctx.node('Load settings').settings;\n  const c = application.candidate;\n\n  const payload = {\n    schema_version: 'submittal.v1',\n    application_id: application.application_id,\n    requisition: { id: requisition.requisition_id, title: requisition.title, facility: requisition.facility },\n    candidate: {\n      name: c.name,\n      specialty: c.specialty,\n      years_experience: c.years_experience,\n      license: `${c.license_state}${c.license_multistate ? ' (multistate)' : ''}`,\n      shift_preference: c.shift_preference,\n    },\n    score: screening.score,\n    criteria: screening.criteria.map((k) => ({\n      text: k.text,\n      rating_label: RATING_LABELS[k.rating],\n      evidence: k.rating > 0 ? k.evidence : '',\n    })),\n    summary: screening.summary,\n    generated_at: new Date().toISOString(),\n  };\n  assertValid(submittalV1, payload, 'submittal.v1');\n\n  const documentName = `Submittal-${application.application_id}-${requisition.requisition_id}.docx`;\n  const subject = `Submittal ${application.application_id}: ${c.name} for ${requisition.title} (${requisition.requisition_id}), score ${screening.score}`;\n  const html = [\n    `<p>${escapeHtml(c.name)} was shortlisted for <b>${escapeHtml(requisition.title)}</b> at ${escapeHtml(requisition.facility)}.</p>`,\n    `<p>Score ${screening.score}/100. ${escapeHtml(screening.summary)}</p>`,\n    `<p>The submittal profile is attached. Application ${application.application_id} in the portal has the full record.</p>`,\n  ].join('\\n');\n\n  return [{\n    json: {\n      payload,\n      document_name: documentName,\n      email: { from: settings.notify_from, to: requisition.recruiter_email, cc: requisition.account_manager_email, subject, html },\n    },\n  }];\n}\n\nmodule.exports = { run };\n}, {\"../lib/contract\":\"src/lib/contract.js\",\"../lib/schemas\":\"src/lib/schemas.js\",\"../lib/scoring\":\"src/lib/scoring.js\"}],\n\"src/lib/contract.js\": [function (module, exports, require) {\n'use strict';\n// A small JSON Schema subset validator. It runs inside n8n Code nodes, where\n// npm packages are not available, so it is dependency free. It supports the\n// keywords the contracts in schemas.js use and nothing else.\n\nclass ContractError extends Error {\n  constructor(code, contract, errors) {\n    const first = errors.slice(0, 3).map((e) => `${e.path || '/'} ${e.message}`).join('; ');\n    super(`[${code}] ${contract}: ${first}${errors.length > 3 ? ` (+${errors.length - 3} more)` : ''}`);\n    this.name = 'ContractError';\n    this.code = code;\n    this.contract = contract;\n    this.errors = errors;\n  }\n}\n\nfunction typeOf(value) {\n  if (value === null) return 'null';\n  if (Array.isArray(value)) return 'array';\n  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number';\n  return typeof value;\n}\n\nfunction typeMatches(expected, actual) {\n  if (expected === actual) return true;\n  return expected === 'number' && actual === 'integer';\n}\n\nfunction validate(schema, value, path = '', errors = []) {\n  const actual = typeOf(value);\n\n  if (schema.type) {\n    const types = Array.isArray(schema.type) ? schema.type : [schema.type];\n    if (!types.some((t) => typeMatches(t, actual))) {\n      errors.push({ path, message: `must be ${types.join(' or ')}, got ${actual}` });\n      return errors;\n    }\n  }\n  if ('const' in schema && value !== schema.const) {\n    errors.push({ path, message: `must equal ${JSON.stringify(schema.const)}` });\n  }\n  if (schema.enum && !schema.enum.includes(value)) {\n    errors.push({ path, message: `must be one of ${schema.enum.map((v) => JSON.stringify(v)).join(', ')}` });\n  }\n\n  if (actual === 'string') {\n    if (schema.minLength !== undefined && value.length < schema.minLength) {\n      errors.push({ path, message: `must be at least ${schema.minLength} characters` });\n    }\n    if (schema.maxLength !== undefined && value.length > schema.maxLength) {\n      errors.push({ path, message: `must be at most ${schema.maxLength} characters` });\n    }\n    if (schema.pattern && !new RegExp(schema.pattern).test(value)) {\n      errors.push({ path, message: `must match ${schema.pattern}` });\n    }\n  }\n\n  if (actual === 'integer' || actual === 'number') {\n    if (schema.minimum !== undefined && value < schema.minimum) {\n      errors.push({ path, message: `must be >= ${schema.minimum}` });\n    }\n    if (schema.maximum !== undefined && value > schema.maximum) {\n      errors.push({ path, message: `must be <= ${schema.maximum}` });\n    }\n  }\n\n  if (actual === 'array') {\n    if (schema.minItems !== undefined && value.length < schema.minItems) {\n      errors.push({ path, message: `must have at least ${schema.minItems} items` });\n    }\n    if (schema.maxItems !== undefined && value.length > schema.maxItems) {\n      errors.push({ path, message: `must have at most ${schema.maxItems} items` });\n    }\n    if (schema.items) value.forEach((item, i) => validate(schema.items, item, `${path}/${i}`, errors));\n  }\n\n  if (actual === 'object') {\n    const props = schema.properties || {};\n    for (const key of schema.required || []) {\n      if (!(key in value) || value[key] === undefined) errors.push({ path: `${path}/${key}`, message: 'is required' });\n    }\n    for (const [key, child] of Object.entries(value)) {\n      if (props[key]) validate(props[key], child, `${path}/${key}`, errors);\n      else if (schema.additionalProperties === false) errors.push({ path: `${path}/${key}`, message: 'is not allowed' });\n    }\n  }\n  return errors;\n}\n\nfunction assertValid(schema, value, contract, code = 'CONTRACT_VIOLATION') {\n  const errors = validate(schema, value);\n  if (errors.length) throw new ContractError(code, contract, errors);\n  return value;\n}\n\n// Structured outputs accept the structural part of JSON Schema but not range or\n// length keywords. The API gets the structure; assertValid enforces the rest.\nconst API_UNSUPPORTED = ['minimum', 'maximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', '$id'];\n\nfunction toApiSchema(schema) {\n  if (Array.isArray(schema)) return schema.map(toApiSchema);\n  if (!schema || typeof schema !== 'object') return schema;\n  const out = {};\n  for (const [key, value] of Object.entries(schema)) {\n    if (API_UNSUPPORTED.includes(key)) continue;\n    out[key] = key === 'properties'\n      ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, toApiSchema(v)]))\n      : toApiSchema(value);\n  }\n  return out;\n}\n\nmodule.exports = { ContractError, validate, assertValid, toApiSchema };\n}, {}],\n\"src/lib/schemas.js\": [function (module, exports, require) {\n'use strict';\n// Versioned contracts between workflow steps. Every Code node that produces one\n// of these shapes validates it before handing it on, so a portal layout change\n// or a malformed model reply stops the run with a reason code instead of\n// travelling downstream as empty fields.\n\nconst STATUSES = ['Shortlisted', 'Recruiter review', 'Low match', 'Screened out', 'Incomplete', 'Manual review'];\nconst BANDS = ['Shortlisted', 'Recruiter review', 'Low match'];\nconst ATTACHMENT_KINDS = ['resume', 'license', 'certification', 'other'];\n\nconst applicationV1 = {\n  $id: 'application.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition_id', 'received_at', 'portal_status', 'csrf_token', 'candidate', 'attachments'],\n  properties: {\n    schema_version: { const: 'application.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    received_at: { type: 'string', pattern: '^\\\\d{4}-\\\\d{2}-\\\\d{2}T' },\n    portal_status: { type: 'string', minLength: 1 },\n    csrf_token: { type: 'string', minLength: 16 },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'email', 'phone', 'home_state', 'license_state', 'license_multistate', 'specialty', 'years_experience', 'shift_preference'],\n      properties: {\n        name: { type: 'string', minLength: 2, maxLength: 120 },\n        email: { type: 'string', pattern: '^[^@\\\\s]+@[^@\\\\s]+$' },\n        phone: { type: 'string', minLength: 7 },\n        home_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_state: { type: 'string', pattern: '^[A-Z]{2}$' },\n        license_multistate: { type: 'boolean' },\n        specialty: { type: 'string', minLength: 2 },\n        years_experience: { type: 'number', minimum: 0, maximum: 60 },\n        shift_preference: { enum: ['days', 'nights', 'any'] },\n      },\n    },\n    attachments: {\n      type: 'array',\n      maxItems: 10,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['kind', 'url', 'filename'],\n        properties: {\n          kind: { enum: ATTACHMENT_KINDS },\n          url: { type: 'string', pattern: '^/attachments/\\\\d+$' },\n          filename: { type: 'string', minLength: 1 },\n        },\n      },\n    },\n  },\n};\n\nconst requisitionV1 = {\n  $id: 'requisition.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'requisition_id', 'title', 'facility', 'boolean_screen', 'required_documents', 'criteria', 'recruiter_email', 'account_manager_email'],\n  properties: {\n    schema_version: { const: 'requisition.v1' },\n    requisition_id: { type: 'string', pattern: '^REQ-\\\\d{3}$' },\n    title: { type: 'string', minLength: 3 },\n    facility: { type: 'string', minLength: 3 },\n    boolean_screen: { type: 'string', minLength: 3 },\n    required_documents: { type: 'array', items: { enum: ATTACHMENT_KINDS } },\n    criteria: {\n      type: 'array',\n      minItems: 2,\n      maxItems: 8,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          text: { type: 'string', minLength: 10 },\n          weight: { type: 'integer', minimum: 1, maximum: 3 },\n          must_have: { type: 'boolean' },\n        },\n      },\n    },\n    recruiter_email: { type: 'string', pattern: '@' },\n    account_manager_email: { type: 'string', pattern: '@' },\n  },\n};\n\nconst prefilterV1 = {\n  $id: 'prefilter.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['outcome', 'boolean_passed', 'failed_clauses', 'matched_terms', 'missing_documents'],\n  properties: {\n    outcome: { enum: ['score', 'screened_out', 'incomplete', 'unreadable'] },\n    boolean_passed: { type: ['boolean', 'null'] },\n    failed_clauses: { type: 'array', items: { type: 'string' } },\n    matched_terms: { type: 'array', items: { type: 'string' } },\n    missing_documents: { type: 'array', items: { type: 'string' } },\n  },\n};\n\n// What the model must return. Sent to the API as the structured-output schema\n// (structure only, see toApiSchema) and enforced in full by the Code node.\nconst modelOutputV1 = {\n  $id: 'model_output.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['criteria', 'summary', 'concerns'],\n  properties: {\n    criteria: {\n      type: 'array',\n      minItems: 1,\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'rating', 'evidence'],\n        properties: {\n          id: { type: 'string', pattern: '^c\\\\d+$' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string', maxLength: 400 },\n        },\n      },\n    },\n    summary: { type: 'string', minLength: 20, maxLength: 900 },\n    concerns: { type: 'array', maxItems: 5, items: { type: 'string', maxLength: 300 } },\n  },\n};\n\nconst screeningV1 = {\n  $id: 'screening.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['score', 'band', 'criteria', 'ungrounded', 'must_have_gaps', 'summary', 'concerns', 'model', 'prompt_version'],\n  properties: {\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    band: { enum: BANDS },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['id', 'text', 'weight', 'must_have', 'rating', 'evidence', 'grounded'],\n        properties: {\n          id: { type: 'string' },\n          text: { type: 'string' },\n          weight: { type: 'integer' },\n          must_have: { type: 'boolean' },\n          rating: { type: 'integer', minimum: 0, maximum: 3 },\n          evidence: { type: 'string' },\n          grounded: { type: 'boolean' },\n        },\n      },\n    },\n    ungrounded: { type: 'integer', minimum: 0 },\n    must_have_gaps: { type: 'array', items: { type: 'string' } },\n    summary: { type: 'string' },\n    concerns: { type: 'array', items: { type: 'string' } },\n    model: { type: 'string', minLength: 1 },\n    prompt_version: { type: 'string', minLength: 1 },\n  },\n};\n\nconst submittalV1 = {\n  $id: 'submittal.v1',\n  type: 'object',\n  additionalProperties: false,\n  required: ['schema_version', 'application_id', 'requisition', 'candidate', 'score', 'criteria', 'summary', 'generated_at'],\n  properties: {\n    schema_version: { const: 'submittal.v1' },\n    application_id: { type: 'string', pattern: '^A-\\\\d{5}$' },\n    requisition: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['id', 'title', 'facility'],\n      properties: { id: { type: 'string' }, title: { type: 'string' }, facility: { type: 'string' } },\n    },\n    candidate: {\n      type: 'object',\n      additionalProperties: false,\n      required: ['name', 'specialty', 'years_experience', 'license', 'shift_preference'],\n      properties: {\n        name: { type: 'string' },\n        specialty: { type: 'string' },\n        years_experience: { type: 'number' },\n        license: { type: 'string' },\n        shift_preference: { type: 'string' },\n      },\n    },\n    score: { type: 'integer', minimum: 0, maximum: 100 },\n    criteria: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['text', 'rating_label', 'evidence'],\n        properties: { text: { type: 'string' }, rating_label: { type: 'string' }, evidence: { type: 'string' } },\n      },\n    },\n    summary: { type: 'string' },\n    generated_at: { type: 'string' },\n  },\n};\n\nmodule.exports = { STATUSES, BANDS, applicationV1, requisitionV1, prefilterV1, modelOutputV1, screeningV1, submittalV1 };\n}, {}],\n\"src/lib/scoring.js\": [function (module, exports, require) {\n'use strict';\n// The model rates evidence per criterion; this module does the arithmetic.\n// Keeping the score out of the model makes it reproducible from the stored\n// ratings and lets the thresholds change without touching the prompt.\n\nconst RATING_LABELS = ['No evidence', 'Weak', 'Partial', 'Strong'];\n\nfunction normalizeForMatch(s) {\n  return String(s)\n    .toLowerCase()\n    .replace(/[‘’]/g, \"'\")\n    .replace(/[“”]/g, '\"')\n    .replace(/[–—]/g, '-')\n    .replace(/\\s+/g, ' ')\n    .replace(/^[\\s\"'.,;:-]+|[\\s\"'.,;:-]+$/g, '')\n    .trim();\n}\n\n// A quote counts as grounded only if it appears verbatim (after whitespace,\n// case and quote-mark normalization) in the text the model was given.\nfunction isGrounded(evidence, sourceText) {\n  const needle = normalizeForMatch(evidence);\n  if (needle.length < 12) return false;\n  return normalizeForMatch(sourceText).includes(needle);\n}\n\nfunction computeScore(criteria) {\n  const max = criteria.reduce((sum, c) => sum + c.weight * 3, 0);\n  const got = criteria.reduce((sum, c) => sum + c.weight * c.rating, 0);\n  return max === 0 ? 0 : Math.round((100 * got) / max);\n}\n\nfunction bandFor(score, mustHaveGaps, thresholds) {\n  if (score >= thresholds.shortlist && mustHaveGaps.length === 0) return 'Shortlisted';\n  if (score >= thresholds.review) return 'Recruiter review';\n  return 'Low match';\n}\n\nmodule.exports = { RATING_LABELS, normalizeForMatch, isGrounded, computeScore, bandFor };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/build-submittal.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Build submittal) \");\n  throw e;\n}"
+      },
+      "id": "359aff55-9649-4931-a4c4-b84f3f8280e3",
+      "name": "Build submittal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        1990
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Load settings').first().json.settings.docsvc_base_url }}/render",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ template: 'submittal-profile', data: $json.payload, filename: $json.document_name }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "4be81747-38a2-4621-aaa5-3aac67bf94a8",
+      "name": "Render Word submittal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1640,
+        1990
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/raise-step-error.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/raise-step-error.js\": [function (module, exports, require) {\n'use strict';\n// Code nodes \"Login or page fetch failed\", \"Requisition or resume fetch failed\",\n// \"Model call failed\" and \"Render failed\".\n// Every HTTP node in the screening workflow retries on its own first. When it\n// still fails, its error output lands here. n8n would otherwise surface the\n// failure to the caller as a generic \"The service failed to process your\n// request\", losing which step failed and the status code. This re-throws it\n// tagged, so the dead letter says exactly what broke and whether a replay can\n// fix it.\n\nconst STEP_CODES = {\n  'Fetch application page': 'PORTAL_UNAVAILABLE',\n  'Refetch application page': 'PORTAL_UNAVAILABLE',\n  'Fetch requisition page': 'PORTAL_UNAVAILABLE',\n  'Download resume': 'PORTAL_UNAVAILABLE',\n  'Portal login': 'PORTAL_UNAVAILABLE',\n  'Log in again': 'PORTAL_UNAVAILABLE',\n  'Extract resume text': 'DOCSVC_UNAVAILABLE',\n  'Render Word submittal': 'DOCSVC_UNAVAILABLE',\n  'Claude: rate criteria': 'LLM_UNAVAILABLE',\n};\n\nfunction describe(error) {\n  if (!error) return { status: null, message: 'no error detail' };\n  if (typeof error === 'string') {\n    const status = (error.match(/\\b([45]\\d\\d)\\b/) || [])[1];\n    return { status: status ? Number(status) : null, message: error };\n  }\n  const status = Number(error.httpCode || error.status || (String(error.message || '').match(/\\b([45]\\d\\d)\\b/) || [])[1]) || null;\n  const message = [error.message, error.description].filter(Boolean).join(' | ');\n  return { status, message: message || JSON.stringify(error).slice(0, 300) };\n}\n\nfunction codeFor(step, status) {\n  const base = STEP_CODES[step] || 'STEP_FAILED';\n  // A 4xx from the model API is a request problem a replay will not fix.\n  if (base === 'LLM_UNAVAILABLE' && status && status >= 400 && status < 500 && status !== 408 && status !== 429) return 'LLM_REQUEST_REJECTED';\n  return base;\n}\n\nfunction run(items, ctx) {\n  const step = ctx.prevNode || 'unknown step';\n  const { status, message } = describe(items[0] && items[0].json && items[0].json.error);\n  const code = codeFor(step, status);\n  throw new Error(`[${code}] (node: ${step}) ${status ? `HTTP ${status} ` : ''}after retries: ${message}`.slice(0, 1000));\n}\n\nmodule.exports = { run, describe, codeFor, STEP_CODES };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/raise-step-error.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Render failed) \");\n  throw e;\n}"
+      },
+      "id": "54888028-7b40-40cf-a77a-d03d069713db",
+      "name": "Render failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        2180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/attach-email-fields.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/attach-email-fields.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Attach email fields\".\n// The render call returns the .docx as binary data and no JSON. This puts the\n// email fields next to the binary so the email adapter receives one item.\n\nfunction run(items, ctx) {\n  const { email, document_name } = ctx.node('Build submittal');\n  const binary = items[0].binary || {};\n  if (!binary.data) throw new Error('[DOCUMENT_MISSING] the render service returned no file');\n  binary.data.fileName = document_name;\n  return [{ json: { ...email, attachment_field: 'data', document_name }, binary }];\n}\n\nmodule.exports = { run };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/attach-email-fields.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Attach email fields) \");\n  throw e;\n}"
+      },
+      "id": "714fdca2-f054-4854-a6dd-3943ac4606c1",
+      "name": "Attach email fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        1990
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "AdapterEmail0001",
+          "mode": "list",
+          "cachedResultName": "Adapter · Send email"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "a42ad907-dc8f-428c-a78d-05e4bdea8d78",
+      "name": "Send submittal email",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2040,
+        1990
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update submittals set document_name = $2, message_id = $3, sent_at = now()\nwhere application_id = $1\nreturning application_id, document_name, message_id;",
+        "options": {
+          "queryReplacement": "={{ [ $('Decide status').first().json.application_id, $('Build submittal').first().json.document_name, $json.messageId || $json.response || '' ] }}"
+        }
+      },
+      "id": "27479cf9-b11f-47a1-a9b8-81d7cdd614d9",
+      "name": "Record submittal",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2240,
+        1990
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "credPgLedger0001",
+          "name": "Screening ledger (Postgres)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// source: src/code-nodes/summarize-run.js\n// Generated by scripts/sync-code-nodes.mjs. Edit the source file and re-run the script, not this node.\nconst __defs = {\n\"src/code-nodes/summarize-run.js\": [function (module, exports, require) {\n'use strict';\n// Code node \"Summarize run\".\n// Collects what happened on this run into one JSON document for the ledger.\n// \"Complete run\" stores it with a single parameter, which keeps the SQL short\n// and avoids positional-parameter mistakes when a field is null.\n\nfunction run(items, ctx) {\n  const claim = ctx.node('Claim run');\n  const pre = ctx.node('Pre-filter');\n  const decision = ctx.node('Decide status');\n  const scored = ctx.executed('Validate and score') ? ctx.node('Validate and score') : null;\n  const sentNow = ctx.executed('Record submittal');\n\n  let submittal = null;\n  if (decision.needs_submittal) {\n    submittal = sentNow\n      ? { document_name: ctx.node('Build submittal').document_name, message_id: ctx.node('Record submittal').message_id, sent: true }\n      : { sent: false, note: 'already sent on an earlier run' };\n  }\n\n  const summary = {\n    outcome: decision.status,\n    reason: decision.reason,\n    note: decision.note,\n    requisition_id: decision.requisition_id,\n    score: scored && scored.screening ? scored.screening.score : null,\n    band: scored && scored.screening ? scored.screening.band : null,\n    status_written: ctx.executed('Confirm status write'),\n    portal_status_before: decision.portal_status,\n    relogged: ctx.node('Normalize application').relogged,\n    content_hash: pre.content_hash,\n    resume_chars: pre.resume_chars,\n    prefilter: pre.prefilter,\n    screening: scored ? scored.screening : null,\n    usage: scored ? scored.usage : null,\n    submittal,\n  };\n  return [{ json: { run_id: claim.run_id, summary } }];\n}\n\nmodule.exports = { run };\n}, {}],\n};\nconst __cache = {};\nfunction __load(key) {\n  if (__cache[key]) return __cache[key].exports;\n  const [fn, deps] = __defs[key];\n  const module = { exports: {} };\n  __cache[key] = module;\n  fn(module, module.exports, (p) => { if (!(p in deps)) throw new Error('not bundled: ' + p); return __load(deps[p]); });\n  return module.exports;\n}\nconst __ctx = {\n  node: (name) => $(name).first().json,\n  executed: (name) => $(name).isExecuted,\n  executionId: $execution.id,\n  prevNode: typeof $prevNode !== 'undefined' && $prevNode ? $prevNode.name : null,\n};\n// Errors name this node, so a dead letter says where the run stopped.\ntry {\n  return __load(\"src/code-nodes/summarize-run.js\").run($input.all(), __ctx, {});\n} catch (e) {\n  if (e && typeof e.message === 'string' && !e.message.includes('(node: ')) e.message = e.message.replace(/^(\\[[A-Z_]+\\] )?/, (m) => m + \"(node: Summarize run) \");\n  throw e;\n}"
+      },
+      "id": "f9ec6da1-c667-4331-af04-34d3c4ef3275",
+      "name": "Summarize run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2440,
+        2350
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update runs r set\n  status = 'completed',\n  outcome = s.j->>'outcome',\n  reason = s.j->>'reason',\n  note = s.j->>'note',\n  requisition_id = s.j->>'requisition_id',\n  score = (s.j->>'score')::int,\n  band = s.j->>'band',\n  status_written = (s.j->>'status_written')::boolean,\n  relogged = (s.j->>'relogged')::boolean,\n  content_hash = s.j->>'content_hash',\n  resume_chars = (s.j->>'resume_chars')::int,\n  prefilter = s.j->'prefilter',\n  screening = nullif(s.j->'screening', 'null'::jsonb),\n  usage = nullif(s.j->'usage', 'null'::jsonb),\n  submittal = nullif(s.j->'submittal', 'null'::jsonb),\n  finished_at = now()\nfrom (select $2::jsonb as j) s\nwhere r.id = $1::bigint\nreturning r.id as run_id, r.application_id, r.outcome, r.score, r.band;",
+        "options": {
+          "queryReplacement": "={{ [ $json.run_id, JSON.stringify($json.summary) ] }}"
+        }
+      },
+      "id": "aa0774c1-d97d-4415-abfd-394ecbca0963",
+      "name": "Complete run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2640,
+        2350
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "credPgLedger0001",
+          "name": "Screening ledger (Postgres)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Load settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load settings": {
+      "main": [
+        [
+          {
+            "node": "Claim run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim run": {
+      "main": [
+        [
+          {
+            "node": "Claimed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claimed?": {
+      "main": [
+        [
+          {
+            "node": "Portal login",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Portal login": {
+      "main": [
+        [
+          {
+            "node": "Read session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Login or page fetch failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read session": {
+      "main": [
+        [
+          {
+            "node": "Fetch application page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch application page": {
+      "main": [
+        [
+          {
+            "node": "Check session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Login or page fetch failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check session": {
+      "main": [
+        [
+          {
+            "node": "Session expired?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Session expired?": {
+      "main": [
+        [
+          {
+            "node": "Log in again",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract application fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log in again": {
+      "main": [
+        [
+          {
+            "node": "Read new session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Login or page fetch failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read new session": {
+      "main": [
+        [
+          {
+            "node": "Refetch application page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Refetch application page": {
+      "main": [
+        [
+          {
+            "node": "Check session again",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Login or page fetch failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check session again": {
+      "main": [
+        [
+          {
+            "node": "Extract application fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract application fields": {
+      "main": [
+        [
+          {
+            "node": "Normalize application",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize application": {
+      "main": [
+        [
+          {
+            "node": "Fetch requisition page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch requisition page": {
+      "main": [
+        [
+          {
+            "node": "Extract requisition fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisition or resume fetch failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract requisition fields": {
+      "main": [
+        [
+          {
+            "node": "Normalize requisition",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize requisition": {
+      "main": [
+        [
+          {
+            "node": "Resume attached?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume attached?": {
+      "main": [
+        [
+          {
+            "node": "Download resume",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pre-filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download resume": {
+      "main": [
+        [
+          {
+            "node": "Extract resume text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisition or resume fetch failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract resume text": {
+      "main": [
+        [
+          {
+            "node": "Check resume text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisition or resume fetch failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check resume text": {
+      "main": [
+        [
+          {
+            "node": "Pre-filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pre-filter": {
+      "main": [
+        [
+          {
+            "node": "Needs scoring?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs scoring?": {
+      "main": [
+        [
+          {
+            "node": "Build scoring request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decide status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build scoring request": {
+      "main": [
+        [
+          {
+            "node": "Claude: rate criteria",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: rate criteria": {
+      "main": [
+        [
+          {
+            "node": "Validate and score",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Model call failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate and score": {
+      "main": [
+        [
+          {
+            "node": "Decide status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide status": {
+      "main": [
+        [
+          {
+            "node": "Status still New?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status still New?": {
+      "main": [
+        [
+          {
+            "node": "Write status to portal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Shortlisted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write status to portal": {
+      "main": [
+        [
+          {
+            "node": "Confirm status write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm status write": {
+      "main": [
+        [
+          {
+            "node": "Shortlisted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shortlisted?": {
+      "main": [
+        [
+          {
+            "node": "Reserve submittal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Summarize run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserve submittal": {
+      "main": [
+        [
+          {
+            "node": "First submittal?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "First submittal?": {
+      "main": [
+        [
+          {
+            "node": "Build submittal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Summarize run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build submittal": {
+      "main": [
+        [
+          {
+            "node": "Render Word submittal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Word submittal": {
+      "main": [
+        [
+          {
+            "node": "Attach email fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Render failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach email fields": {
+      "main": [
+        [
+          {
+            "node": "Send submittal email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send submittal email": {
+      "main": [
+        [
+          {
+            "node": "Record submittal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record submittal": {
+      "main": [
+        [
+          {
+            "node": "Summarize run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize run": {
+      "main": [
+        [
+          {
+            "node": "Complete run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
