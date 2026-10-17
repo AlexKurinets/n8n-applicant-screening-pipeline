@@ -49,6 +49,13 @@ app.get('/runs/:id', wrap(async (req, res) => {
   return res.send(views.runPage({ r, links }));
 }));
 
+// A stable link by application, whatever its run number turned out to be.
+app.get('/applications/:id', wrap(async (req, res) => {
+  const { rows } = await db.query('select id from runs where application_id = $1 order by id desc limit 1', [req.params.id]);
+  if (!rows[0]) return res.status(404).send(views.layout({ title: 'Not found', active: 'Runs', body: '<p>No run for that application yet.</p>', links }));
+  return res.redirect(302, `/runs/${rows[0].id}`);
+}));
+
 app.get('/dead-letters', wrap(async (req, res) => {
   res.send(views.deadLettersPage({ rows: await q.deadLetters(db), flash: req.query.flash, links }));
 }));

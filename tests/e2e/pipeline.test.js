@@ -109,6 +109,7 @@ test('dashboard pages render (smoke)', async () => {
   assert.match(detail, /Model ratings/);
   assert.match(detail, /Grounded/);
   assert.match(await page('/runs?outcome=Screened%20out'), /Screened out/);
+  assert.match(await page('/applications/A-10125'), /Run #\d+/, 'stable link by application id');
   assert.match(await page('/dead-letters'), /PORTAL_LAYOUT_CHANGED/);
   const doc = await fetch(`${DASHBOARD}/documents/${encodeURIComponent(shortlisted.doc)}`);
   assert.equal(doc.status, 200);
