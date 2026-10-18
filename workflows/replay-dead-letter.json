@@ -5,7 +5,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Replay a dead letter\n`POST /webhook/screening/replay` with `{\"dead_letter_id\": 12}`. The dashboard's Replay button calls this. The failed run no longer holds a live claim, so the application is screened again from the top through the same workflow, and the dead letter records the outcome.",
+        "content": "## Replay a dead letter\n`POST /webhook/screening/replay` with `{\"dead_letter_id\": 12}`. The dashboard's Replay button calls this. The failed run no longer holds a live claim, so the application is screened again from the top through the same workflow, and the dead letter records the outcome. If the replay fails too, a new dead letter takes its place, so only one stays open.",
         "height": 130,
         "width": 1100,
         "color": 7
@@ -209,7 +209,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ replayed: false, application_id: $('Find dead letter').first().json.application_id, error_code: $json.error_code || 'see new dead letter' }) }}",
+        "responseBody": "={{ JSON.stringify({ replayed: false, application_id: $('Find dead letter').first().json.application_id, error_code: $('Record failure').first().json.error_code || 'see new dead letter' }) }}",
         "options": {
           "responseCode": 200
         }
@@ -219,7 +219,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1600,
+        1820,
         340
       ]
     },
@@ -239,6 +239,29 @@
         920,
         440
       ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update dead_letters set replayed_at = now(), replay_outcome = $2\nwhere id = $1::bigint\nreturning id, application_id, replay_outcome;",
+        "options": {
+          "queryReplacement": "={{ [ $('Find dead letter').first().json.dead_letter_id, 'failed again: ' + ($json.error_code || 'see the new dead letter') ] }}"
+        }
+      },
+      "id": "67e5ce4a-8d56-4d8c-a20c-b2b94ad32f52",
+      "name": "Close old dead letter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1600,
+        340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "credPgLedger0001",
+          "name": "Screening ledger (Postgres)"
+        }
+      }
     }
   ],
   "connections": {
@@ -323,6 +346,17 @@
       ]
     },
     "Record failure": {
+      "main": [
+        [
+          {
+            "node": "Close old dead letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close old dead letter": {
       "main": [
         [
           {

@@ -277,7 +277,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- IDs on the portal's New list that have no live claim yet.\nselect t.app_id as application_id, 'sweep' as source\nfrom jsonb_array_elements_text($1::jsonb) as t(app_id)\nwhere not exists (\n  select 1 from runs r where r.application_id = t.app_id and r.status in ('processing', 'completed')\n)\norder by t.app_id;",
+        "query": "-- IDs on the portal's New list that have no live claim yet, leaving out\n-- applications parked in the dead-letter queue until someone replays them.\nselect t.app_id as application_id, 'sweep' as source\nfrom jsonb_array_elements_text($1::jsonb) as t(app_id)\nwhere not exists (\n  select 1 from runs r where r.application_id = t.app_id and r.status in ('processing', 'completed')\n)\nand not exists (\n  select 1 from dead_letters d where d.application_id = t.app_id and d.replayed_at is null\n)\norder by t.app_id;",
         "options": {
           "queryReplacement": "={{ [ JSON.stringify($json.ids) ] }}"
         }

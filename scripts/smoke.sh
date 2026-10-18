@@ -32,6 +32,17 @@ cli wait --min 160
 step "Check the seeded week against the offline prediction"
 npm run --silent test:e2e
 
+step "A second sweep and a repeat notification leave parked applications alone"
+curl -fsS -X POST "$N8N/webhook/screening/sweep" -H 'content-type: application/json' -d '{}'
+echo
+sleep 8
+cli wait --min 160
+wait_for "still 160 runs" "select count(*) from runs" "160"
+wait_for "still 2 dead letters" "select count(*) from dead_letters" "2"
+cli duplicate-notification A-10025
+wait_for "the repeat notification for A-10025 was parked"   "select count(*) from intake_events where application_id = 'A-10025' and outcome = 'parked'" "1"
+wait_for "still 2 dead letters" "select count(*) from dead_letters" "2"
+
 step "A new application arrives by email (IMAP fast path)"
 cli new-application
 wait_for "A-10161 shortlisted through the mailbox" \

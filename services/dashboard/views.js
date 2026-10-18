@@ -203,7 +203,7 @@ ${sc.criteria.map((c) => `<tr><td>${esc(c.text)}${c.must_have ? ' <span class="m
 <dt>Missing documents</dt><dd>${pf.missing_documents.map(esc).join(', ') || '–'}</dd></dl></div>` : '';
 
   const history = `<div class="card"><h2>Triggers and other runs for ${esc(r.application_id)}</h2><table><thead><tr><th>When (UTC)</th><th>Source</th><th>Result</th></tr></thead><tbody>
-${r.events.map((e) => `<tr><td>${fmtTime(e.received_at)}</td><td>${esc(e.source)}</td><td>${e.outcome === 'duplicate' ? 'duplicate, skipped' : `claimed as run <a href="/runs/${e.run_id}">#${e.run_id}</a>`}</td></tr>`).join('')}
+${r.events.map((e) => `<tr><td>${fmtTime(e.received_at)}</td><td>${esc(e.source)}</td><td>${e.outcome === 'duplicate' ? 'duplicate, skipped' : e.outcome === 'parked' ? 'parked by an open dead letter, skipped' : `claimed as run <a href="/runs/${e.run_id}">#${e.run_id}</a>`}</td></tr>`).join('')}
 ${r.dead_letters.map((d) => `<tr><td>${fmtTime(d.created_at)}</td><td>dead letter #${d.id}</td><td><span class="flag">${esc(d.error_code)}</span>${d.replayed_at ? ` · replayed: ${esc(d.replay_outcome)}` : ''}</td></tr>`).join('')}
 </tbody></table></div>`;
 

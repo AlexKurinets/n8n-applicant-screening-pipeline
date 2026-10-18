@@ -105,3 +105,15 @@ test('a Code node error names the node it came from', () => {
   const login = { all: () => [{ json: { data: '<body data-page="login">' } }] };
   assert.throws(() => fn(() => ({}), login, { id: '1' }, null), /^Error: \[SESSION_EXPIRED\] \(node: Check session again\) /);
 });
+
+test('an application with an open dead letter is parked until a replay', () => {
+  const screen = byId.get('ScrApp0000000001');
+  const claim = screen.nodes.find((n) => n.name === 'Claim run').parameters.query;
+  assert.match(claim, /from dead_letters\s+where application_id = \$1 and replayed_at is null and \$2 <> 'replay'/);
+  assert.match(claim, /then 'parked'/);
+  const sweep = byId.get('IntakeSweep00001');
+  const unclaimed = sweep.nodes.find((n) => n.name === 'Skip claimed').parameters.query;
+  assert.match(unclaimed, /from dead_letters d where d\.application_id = t\.app_id and d\.replayed_at is null/);
+  const replay = byId.get('ReplayDeadLetter');
+  assert.deepEqual(replay.connections['Record failure'].main[0].map((c) => c.node), ['Close old dead letter']);
+});
